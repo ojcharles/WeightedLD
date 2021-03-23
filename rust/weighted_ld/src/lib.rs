@@ -585,32 +585,93 @@ pub fn all_weighted_ld_pairs(
 
     let computed_pair_count = AtomicUsize::new(0);
     let progress_report = Mutex::new(progress_report);
+    
+    // Consider the complete pair set as an upper triangular matrix of size (n_sites, n_site),
+    // where the column index is the index of the first pair, and the row index is the index of the
+    // second pair.
+    //
+    // Each element of the matrix is independant of all others (computationally), so the work to
+    // compute them all could in principal be split into N(N-1)/2 tasks for rayon to schedule,
+    // where each task computes a single element. Splitting the work in this manner would be
+    // tremendously inneficient however - for most real alignments this would mean a vast number of
+    // very quick tasks, so the task scheduling overhead would dominate.
+    // 
+    // A better method would be to split the set of elements to compute into chunks, and let each
+    // task consist of computing all of a single chunk.
+    //
+    // A simple chunking scheme could be for each row of the matrix to be a chunk. This scheme is
+    // sufficient to give a substantial speedup over the non-chunked computation, but is terrible
+    // for data-locality as a chunk of length k needs to read k different sites.
+    //
+    // A better chunking scheme would be to split the matrix into square tiles of side length k.
+    // Under this scheme each chunk only needs to read k*2 sites to compute k^2 elements. k should
+    // be tuned such that every thread can fit all k*2 sites for the chunk it is currently
+    // computing into cpu cache concurrently to minimize constant swapping of data from main
+    // memory.
+    // This is the chunking scheme implemented by this method.
 
-    let data_chunks = (0..(site_set.n_sites() - 1))
+    // The side length of the square chunks
+    // TODO: pick this value dynamically based on {n_seqs, cpu cache size}
+    let chunk_size = 256;
+    
+    // The number of chunks along a single edge of the matrix
+    let n = site_set.n_sites() / chunk_size;
+    let n = if (site_set.n_sites() % chunk_size) > 0 { n + 1 } else { n };
+
+    
+    // Given a linear chunk index, return the 2d chunk coordinates
+    fn triu_index(n: usize, i: usize) -> (usize, usize) {
+        // The "triangular root" of i
+        let root = ((i as f32 * 8f32 + 1f32).sqrt() - 1f32) / 2f32;
+        let root_floor = root.floor() as usize;
+
+        let row = n - root_floor - 1;
+        let col = row + i - (root_floor * (root_floor + 1) / 2);
+        
+        (row, col)
+    }
+    
+    let chunk_count = n * (n + 1) / 2;
+    let data_chunks = (0..chunk_count)
         .into_par_iter()
-        .map(|first_idx| {
-            let a = site_set.site_symbols(first_idx);
-            let a_hist = site_set.site_histogram(first_idx);
-            let mut results_chunk = Vec::new();
-            for second_idx in (first_idx + 1)..site_set.n_sites() {
-                let b = site_set.site_symbols(second_idx);
-                let b_hist = site_set.site_histogram(second_idx);
-                if let Some(ld_stat) = single_weighted_ld_pair(a, a_hist, b, b_hist, weights) {
-                    if ld_stat.r2 > r2_threshold {
-                        results_chunk.push(PairData {
-                            first_idx: site_set.parent_site_index(first_idx),
-                            second_idx: site_set.parent_site_index(second_idx),
-                            data: ld_stat,
-                        });
+        .map(|linear_chunk_index| {
+            let (chunk_a, chunk_b) = triu_index(n, linear_chunk_index);
+            let a_start = chunk_a * chunk_size;
+            let a_end = std::cmp::min(a_start + chunk_size, site_set.n_sites());
+            let b_start = chunk_b * chunk_size;
+            let b_end = std::cmp::min(b_start + chunk_size, site_set.n_sites());
+            
+            let mut results_chunk = Vec::with_capacity(chunk_size * chunk_size);
+            let mut computed = 0;
+
+            for a_idx in a_start..a_end {
+                let a = site_set.site_symbols(a_idx);
+                let a_hist = site_set.site_histogram(a_idx);
+                for b_idx in b_start..b_end {
+                    if b_idx <= a_idx {
+                        continue;
+                    }
+
+                    let b = site_set.site_symbols(b_idx);
+                    let b_hist = site_set.site_histogram(b_idx);
+
+                    computed += 1;
+                    if let Some(ld_stat) = single_weighted_ld_pair(a, a_hist, b, b_hist, weights) {
+                        if ld_stat.r2 > r2_threshold {
+                            results_chunk.push(PairData {
+                                first_idx: site_set.parent_site_index(a_idx),
+                                second_idx: site_set.parent_site_index(b_idx),
+                                data: ld_stat,
+                            });
+                        }
                     }
                 }
             }
-
-            let computed = computed_pair_count
-                .fetch_add(site_set.n_sites() - first_idx - 1, Ordering::Relaxed);
+            let total_computed = computed_pair_count
+                .fetch_add(computed, Ordering::Relaxed);
             (progress_report
                 .lock()
-                .expect("Failed to get lock on progress indicator callback"))(computed);
+                .expect("Failed to get lock on progress indicator callback"))(total_computed);
 
             results_chunk
         })
