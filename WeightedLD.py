@@ -1,5 +1,6 @@
 # Oscar Charles 210404
 # #Steven Henikoff and Jorja G. Henikoff (1994) "Position-based Sequence Weights" 
+# using matt hahn molpopgen book
 # This code calculates sequence weights using the Henikoff formula from a multiple sequuence alignment
 # usage python WeightedLD.py alignment.fasta
 
@@ -99,26 +100,82 @@ for i in outer_loop:
         print(str(i) + "   " + str(j))
         # compare each pairwise position
         
+        #----- remove any sequences with indel character
+        # which index values need removing?
+        i_array = a.alignment_array[:,i]
+        remove = np.where(i_array == 4) # which seqs contain illegal char in i
+        j_array = a.alignment_array[:,j]
+        remove = np.append(remove,np.where(j_array == 4)) # which sequences in total contain illegals?
+        remove = np.unique(remove)
+        
+        # remove any sequence as identified above, which contained a illegal in i or j
+        i_array = np.delete(i_array, remove)
+        j_array = np.delete(j_array, remove)
+        tSeqs = len(i_array) # for this comparison, how many seqs are there?
+        
+        
+        
+        
+        
         # first site
         # find major allele
-        i_array = a.alignment_array[:,i]
         unique_elements, counts_elements = np.unique(i_array, return_counts=True)
-        major = unique_elements[counts_elements.argmax()] # which is max
-        i_array = np.where(i_array== major, 1, 0) # if is major then
-                
+        major = unique_elements[counts_elements.argmax()] # which value is max
+        i_array = np.where(i_array == major, 1, 0) # if is major value then 1 else 0
+        PA = np.count_nonzero(i_array == 1) / tSeqs
+        Pa = np.count_nonzero(i_array == 0) / tSeqs
+        
+        
+        
+        
         
         # second site
         # find major allelle
-        j_array = a.alignment_array[:,j]
-        unique_elements, counts_elements = np.unique(i_array, return_counts=True)
+        unique_elements, counts_elements = np.unique(j_array, return_counts=True)
         major = unique_elements[counts_elements.argmax()] # which is max
-        j_array = np.where(j_array== major, 1, 0) # if is major then
+        j_array = np.where(j_array == major, 1, 0) # if is major then
+        PB = np.count_nonzero(j_array == 1) / tSeqs
+        Pb = np.count_nonzero(j_array == 0) / tSeqs
         
         
-        # generate the frequencies of all 4 alleles
+        # predicted allele freqs if in equilibrium
+        PAB = PA * PB
+        PAb = PA * Pb
+        PaB = Pa * PB
+        Pab = Pa * Pb
+
+        
+        
+        
+        # observed allele freqs
+        weights = np.zeros(shape=(tSeqs))
+        weights[weights == 0] = 1
         ld_ops = np.zeros(shape=(4),dtype=(np.float32)) # as weighting is fractional
-        for k in range(0,nSeqs): # for each sequence, see which bin it fits in. then rather than inc by 1 . increment by weighting
-            
+        for k in range(0,tSeqs): # for each sequence, see which bin it fits in. then rather than inc by 1 . increment by weighting
+            if i_array[k] == 0 and j_array[k] == 0:
+                ld_ops[0] = ld_ops[0] + weights[k]
+            elif i_array[k] == 1 and j_array[k] == 1:
+                ld_ops[3] = ld_ops[3] + weights[k]
+            elif i_array[k] == 0 and j_array[k] == 1:
+                ld_ops[1] = ld_ops[1] + weights[k]
+            elif i_array[k] == 1 and j_array[k] == 0:
+                ld_ops[2] = ld_ops[2] + weights[k]
+            else:
+                print(k)
+            ld_ops = ld_ops / tSeqs
+                
+        # the vector is now as in the hahn molpopgen book and can be used to generate D values
+        # ld_ops is pAB, p
+        tD = np.zeros(shape=(4),dtype=(np.float32))
+        tD[0] = abs(ld_ops[3] - PAB) # MajMaj
+        tD[1] = abs(ld_ops[0] - Pab) # minmin  
+        tD[2] = abs(ld_ops[2] - PAb) #Majmin
+        tD[3] = abs(ld_ops[1] - PaB) #minMaj
+        
+        out = (tD[0] + tD[1] + tD[2] + tD[3]) / 4
+        out = round(out, 6)
+        return out
+        
         
 
 
