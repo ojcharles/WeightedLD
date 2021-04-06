@@ -28,12 +28,14 @@ class MSA:
     # generate allelle matrix
     # todo
     # make the numeric array small that int23, memory efficient for larger alignments
+    # henikoff weighting
+    # make var sites integer
     def __init__(self, alignmentFile):
         self.alignment = AlignIO.read(alignmentFile, "fasta")
         self.nSeqs = len(self.alignment)
         self.nSites = self.alignment.get_alignment_length()
         self.alignment_array = self.alignment2alignment_array(self.alignment)
-        self.var_pos = self.which_pos_var(self.alignment_array, self.nSites)
+        self.var_sites = self.which_pos_var(self.alignment_array, self.nSites)
         self.weighting = self.henikoff_weighting(self)
     
     def alignment2alignment_array(self, alignment):
@@ -60,7 +62,7 @@ class MSA:
             # alignment array
         # out
             # vector of variable position ignore character 4
-        which_var = np.zeros(shape=(nSites,1))
+        which_var = np.zeros(shape=(nSites,1),dtype=(np.int32))
         for pos in range(0,nSites):
             #print(pos)
             a = np.unique(alignment_array[:,pos])
@@ -68,35 +70,62 @@ class MSA:
             a = len(a)
             if a > 1:
                 which_var[pos] = pos
-        out = which_var[which_var != 0]
+        out = which_var[which_var != 0] 
         return out
 
     
     def henikoff_weighting(self, nSeqs):
+        # todo
         return np.zeros(shape=(self.nSeqs,1))
         
     
-
-        
-        
     
-
-
-class LD:
-    def __init__(self, alignmentFile,title):
-        self.title = title
-        self.msa = AlignIO.read(alignmentFile, "fasta")
-        
-        
-    def LD_D(alignment_array):
+    def LD_D(self, alignment_array, var_sites):
         # generate LD metric D
+        return 1
+        
+a = MSA(alignmentFile)
+
+
+
+
+
+
+
+outer_loop = a.var_sites[0:len(a.var_sites)-1]
+inner_loop = a.var_sites[1:len(a.var_sites)]
+for i in outer_loop:
+    for j in inner_loop:
+        print(str(i) + "   " + str(j))
+        # compare each pairwise position
+        
+        # first site
+        # find major allele
+        i_array = a.alignment_array[:,i]
+        unique_elements, counts_elements = np.unique(i_array, return_counts=True)
+        major = unique_elements[counts_elements.argmax()] # which is max
+        i_array = np.where(i_array== major, 1, 0) # if is major then
+                
+        
+        # second site
+        # find major allelle
+        j_array = a.alignment_array[:,j]
+        unique_elements, counts_elements = np.unique(i_array, return_counts=True)
+        major = unique_elements[counts_elements.argmax()] # which is max
+        j_array = np.where(j_array== major, 1, 0) # if is major then
         
         
-a = 
+        # generate the frequencies of all 4 alleles
+        ld_ops = np.zeros(shape=(4),dtype=(np.float32)) # as weighting is fractional
+        for k in range(0,nSeqs): # for each sequence, see which bin it fits in. then rather than inc by 1 . increment by weighting
+            
+        
 
-a = LD(title = "oscar",alignmentFile = "test.fasta")
-print(a.title)
 
 
-# np play
+
+
+
+
+
         
