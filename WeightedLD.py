@@ -174,7 +174,13 @@ for i in outer_loop:
         
         out = (tD[0] + tD[1] + tD[2] + tD[3]) / 4
         out = round(out, 6)
-        return out
+        
+        
+        
+        # calculate R2
+        out**2 / ( PA * Pa * PB * Pb )
+        
+        
         
         
 
