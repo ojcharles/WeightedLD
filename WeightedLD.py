@@ -28,12 +28,16 @@ class MSA:
     # generate allelle matrix
     # todo
     # make the numeric array small that int23, memory efficient for larger alignments
-    alignment = AlignIO.read(alignmentFile, "fasta")
-    nSeqs = len(alignment)
-    nSites = alignment.get_alignment_length()
+    def __init__(self, alignmentFile):
+        self.alignment = AlignIO.read(alignmentFile, "fasta")
+        self.nSeqs = len(self.alignment)
+        self.nSites = self.alignment.get_alignment_length()
+        self.alignment_array = self.alignment2alignment_array(self.alignment)
+        self.var_pos = self.which_pos_var(self.alignment_array, self.nSites)
+        self.weighting = self.henikoff_weighting(self)
     
-    def alignment2alignment_array(alignment):
-        alignment_array = np.array([list(rec) for rec in alignment], np.character) # alignment as matrix
+    def alignment2alignment_array(self, alignment):
+        alignment_array = np.array([list(rec) for rec in alignment], np.dtype("U4")) # alignment as matrix
         alignment_array = alignment_array.astype('U13') #convert from bytecode to character       
         BaseToInt = {
            "A":0,
@@ -49,11 +53,30 @@ class MSA:
         # translate character matrix to integer using dict
         alignment_array = np.vectorize(BaseToInt.get)(alignment_array)
         return alignment_array
+            
+    
+    def which_pos_var(self, alignment_array, nSites):
+        # in
+            # alignment array
+        # out
+            # vector of variable position ignore character 4
+        which_var = np.zeros(shape=(nSites,1))
+        for pos in range(0,nSites):
+            #print(pos)
+            a = np.unique(alignment_array[:,pos])
+            a = a[a!= 4] # remove the indels
+            a = len(a)
+            if a > 1:
+                which_var[pos] = pos
+        out = which_var[which_var != 0]
+        return out
+
+    
+    def henikoff_weighting(self, nSeqs):
+        return np.zeros(shape=(self.nSeqs,1))
         
     
-    
-    def LD_D(alignment_array):
-        # generate LD metric D
+
         
         
     
@@ -65,9 +88,11 @@ class LD:
         self.msa = AlignIO.read(alignmentFile, "fasta")
         
         
+    def LD_D(alignment_array):
+        # generate LD metric D
         
-
         
+a = 
 
 a = LD(title = "oscar",alignmentFile = "test.fasta")
 print(a.title)
