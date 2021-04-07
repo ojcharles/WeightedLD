@@ -4,12 +4,15 @@
 # This code calculates sequence weights using the Henikoff formula from a multiple sequuence alignment
 # usage python WeightedLD.py alignment.fasta
 
-import sys
+#---------- todo
+# sequence weighting - treat 4 as a not ok character
+# LD - why are some values being returned infinte?
+
 from Bio import AlignIO
 import os
 import numpy as np
-
 os.chdir('C:\\Oscar\\OneDrive\\UCL\\code\\WeightedLD')
+
 
 
 ### modifications
@@ -37,7 +40,7 @@ class MSA:
         self.nSites = self.alignment.get_alignment_length()
         self.alignment_array = self.alignment2alignment_array(self.alignment)
         self.var_sites = self.which_pos_var(self.alignment_array, self.nSites)
-        # self.weighting = self.henikoff_weighting(self)
+        #self.weighting = self.henikoff_weighting(self)
         # LD will be called separately
     
     
@@ -77,15 +80,66 @@ class MSA:
         return out
 
     
-    def henikoff_weighting(self, nSeqs):
-        # todo
-        return np.zeros(shape=(self.nSeqs,1))
-    
+    def henikoff_weighting(self):
+        # todo treat val of 4 as not ok.
+        # generate arrays of nSeqs
+        # for each pos
+            # sum the weighting to seqs
+        # then normalise
+        weights = np.zeros(shape=(self.nSeqs),dtype=(np.float32()))    # the output
+        fracOK = np.zeros(shape=(self.nSeqs),dtype=(np.float32()))     
+        nSitesCounted = 0                                           # we might not count all sites in the weighting
+        okBaseVals = [0,1,2,3,4]                                      # which values are ok
+        
+        #---------- loop over each site, and for each seq keep tally of cumulative weighting
+        for iSite in self.var_sites:                                   # for each variable site
+            array = self.alignment_array[:,iSite]                      # the already converted array i.e. actg--> 01234
+            unique_elements, counts_elements = np.unique(array, return_counts=True)
+            okBase = np.in1d(array, okBaseVals)                     # vector of T/F for okayness ignores anythin other than actg-.
+            tSeqs = np.count_nonzero(okBase)                        # how many seqs are ok and considered?
+            if ( tSeqs / self.nSeqs ) < minACGT:   #if too many missing vals then go to next
+                continue
+            nSitesCounted = nSitesCounted + 1
+            countBase = np.zeros(shape=(5),dtype=(np.int16()))
+            countBase[0] = np.count_nonzero(array == 0)
+            countBase[1] = np.count_nonzero(array == 1)
+            countBase[2] = np.count_nonzero(array == 2)
+            countBase[3] = np.count_nonzero(array == 3)
+            countBase[4] = np.count_nonzero(array == 4)
+            # nRealBase = countBase0 + countBase1 + countBase2 + countBase3  //todo same as tSeq
+            avgWeight = np.zeros(shape=(2),dtype=(np.float32()))
+            for iSeq in range(0,self.nSeqs):  # //todo update this so that it defulats to 0 and only checks okbases
+                if okBase[iSeq]: # calculate the site contribution
+                    iSeq_base = array[iSeq]
+                    siteContribution = 1.0/(tSeqs * countBase[iSeq_base]);  # key    contribution to the weight from this site, this is the henikoff
+                    weights[iSeq] = weights[iSeq] + siteContribution        # Key    For this seq, keep a tab of its cumulative weight over all sites
+                    avgWeight[0] = avgWeight[0] + siteContribution
+                    avgWeight[1] = avgWeight[1] + 1
+                    fracOK[iSeq] = fracOK[iSeq] + 1
+                
+            avgWeight[0] =  avgWeight[0] / avgWeight[1]
+            for iSeq in range(0,self.nSeqs):   # if not okbase, give it the average for this pos
+                if not okBase[iSeq]: 
+                    weights[iSeq] += avgWeight[0]
+        # end of loop over sites
+        
+        
+        #---------- normalise
+        norm = weights / weights.max()
+        
+        #---------- stdout
+        print("seq\tfracOK\tWeight")
+        for iSeq in range(0,self.nSeqs):
+            print(str(iSeq) + "\t" + str(fracOK[iSeq]) + "\t" + str(norm[iSeq]))
+            
+        #end
+        print("alles schon")
+        return norm
         
         
     
     
-    def LD(self, alignment_array, var_sites):
+    def LD(self, weights):
         # generate LD metric D and R2
         print("posa\tposb\tD\tR2") # stdout headers
         outer_loop = self.var_sites[0:len(self.var_sites)-1]
@@ -143,8 +197,6 @@ class MSA:
                 
                 
                 # observed allele freqs
-                weights = np.zeros(shape=(tSeqs))
-                weights[weights == 0] = 1
                 ld_ops = np.zeros(shape=(4),dtype=(np.float32)) # as weighting is fractional
                 for k in range(0,tSeqs): # for each sequence, see which bin it fits in. then rather than inc by 1 . increment by weighting
                     if i_array[k] == 0 and j_array[k] == 0:
@@ -179,66 +231,14 @@ class MSA:
                 print(str(i)+"\t"+str(j)+"\t"+str(D)+"\t"+str(R2))
                 
 
-    def henikoff_weighting(self):
-        # todo treat val of 4 as not ok.
-        # generate arrays of nSeqs
-        # for each pos
-            # sum the weighting to seqs
-        # then normalise
-        weights = np.zeros(shape=(self.nSeqs),dtype=(np.float32()))    # the output
-        fracOK = np.zeros(shape=(self.nSeqs),dtype=(np.float32()))     
-        nSitesCounted = 0                                           # we might not count all sites in the weighting
-        okBaseVals = [0,1,2,3,4]                                      # which values are ok
-        
-        #---------- loop over each site, and for each seq keep tally of cumulative weighting
-        for iSite in self.var_sites:                                   # for each variable site
-            array = self.alignment_array[:,iSite]                      # the already converted array i.e. actg--> 01234
-            unique_elements, counts_elements = np.unique(array, return_counts=True)
-            okBase = np.in1d(array, okBaseVals)                     # vector of T/F for okayness ignores anythin other than actg-.
-            tSeqs = np.count_nonzero(okBase)                        # how many seqs are ok and considered?
-            if ( tSeqs / self.nSeqs ) < minACGT:   #if too many missing vals then go to next
-                continue
-            nSitesCounted = nSitesCounted + 1
-            countBase = np.zeros(shape=(5),dtype=(np.int16()))
-            countBase[0] = np.count_nonzero(array == 0)
-            countBase[1] = np.count_nonzero(array == 1)
-            countBase[2] = np.count_nonzero(array == 2)
-            countBase[3] = np.count_nonzero(array == 3)
-            countBase[4] = np.count_nonzero(array == 4)
-            # nRealBase = countBase0 + countBase1 + countBase2 + countBase3  //todo same as tSeq
-            avgWeight = np.zeros(shape=(2),dtype=(np.float32()))
-            for iSeq in range(0,self.nSeqs):  # //todo update this so that it defulats to 0 and only checks okbases
-                if okBase[iSeq]: # calculate the site contribution
-                    iSeq_base = array[iSeq]
-                    siteContribution = 1.0/(tSeqs * countBase[iSeq_base]);  # key    contribution to the weight from this site, this is the henikoff
-                    weights[iSeq] = weights[iSeq] + siteContribution        # Key    For this seq, keep a tab of its cumulative weight over all sites
-                    avgWeight[0] = avgWeight[0] + siteContribution
-                    avgWeight[1] = avgWeight[1] + 1
-                    fracOK[iSeq] = fracOK[iSeq] + 1
-                
-            avgWeight[0] =  avgWeight[0] / avgWeight[1]
-            for iSeq in range(0,self.nSeqs):   # if not okbase, give it the average for this pos
-                if not okBase[iSeq]: 
-                    weights[iSeq] += avgWeight[0]
-        # end of loop over sites
-        
-        
-        #---------- normalise
-        norm = weights / weights.max()
-        
-        #---------- stdout
-        print("seq\tfracOK\tWeight")
-        for iSeq in range(0,self.nSeqs):
-            print(str(iSeq) + "\t" + fracOK[iSeq] + "\t" + norm[iSeq])
-            
-        #end
-        return "alles schon"
+
         
         
 a = MSA(alignmentFile)
 
+weights = a.henikoff_weighting()
 
-    
+a.LD(weights)
     
  
         
