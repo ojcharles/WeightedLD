@@ -16,13 +16,14 @@ os.chdir('C:\\Oscar\\OneDrive\\UCL\\code\\WeightedLD')
 
 
 ### modifications
-minACGT = 0.5   # Minimum fractions of ACTG at a given site for the site to be included in calculation. increase this to remove more noise say 0.5
+minACGT = 0.95   # Minimum fractions of ACTG at a given site for the site to be included in calculation. increase this to remove more noise say 0.5
 ### end
 
 # handle args
 #msa = sys.argv[0]
 # alignmentFile = "all_raw_best_msa_man4.fasta"
-alignmentFile = "test.fasta"
+#alignmentFile = "test.fasta"
+alignmentFile = "all_raw_best_msa_man4.fasta"
 
 
 
@@ -57,9 +58,13 @@ class MSA:
            "T":3,
            "t":3,
            "-":4,
-           ",":4}
+           ".":4,
+           "k":5,"m":5,"n":5,"r":5,"s":5,"v":5,"y":5,"b":5,"w":5,"h":5,"d":5} # ambiguity codes 
         # translate character matrix to integer using dict
         alignment_array = np.vectorize(BaseToInt.get)(alignment_array)
+        
+        #u,inv = np.unique(alignment_array,return_inverse = True)
+        #alignment_array = np.array(BaseToInt.get(x, 5) for x in u])[inv].reshape(alignmen_array.shape)
         return alignment_array
             
     
@@ -89,7 +94,7 @@ class MSA:
         weights = np.zeros(shape=(self.nSeqs),dtype=(np.float32()))    # the output
         fracOK = np.zeros(shape=(self.nSeqs),dtype=(np.float32()))     
         nSitesCounted = 0                                           # we might not count all sites in the weighting
-        okBaseVals = [0,1,2,3,4]                                      # which values are ok
+        okBaseVals = [0,1,2,3]                                      # which values are ok
         
         #---------- loop over each site, and for each seq keep tally of cumulative weighting
         for iSite in self.var_sites:                                   # for each variable site
@@ -105,7 +110,7 @@ class MSA:
             countBase[1] = np.count_nonzero(array == 1)
             countBase[2] = np.count_nonzero(array == 2)
             countBase[3] = np.count_nonzero(array == 3)
-            countBase[4] = np.count_nonzero(array == 4)
+            # countBase[4] = np.count_nonzero(array == 4)
             # nRealBase = countBase0 + countBase1 + countBase2 + countBase3  //todo same as tSeq
             avgWeight = np.zeros(shape=(2),dtype=(np.float32()))
             for iSeq in range(0,self.nSeqs):  # //todo update this so that it defulats to 0 and only checks okbases
@@ -238,7 +243,7 @@ a = MSA(alignmentFile)
 
 weights = a.henikoff_weighting()
 
-a.LD(weights)
+#ld = a.LD(weights)
     
  
         
