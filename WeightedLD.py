@@ -16,14 +16,14 @@ os.chdir('C:\\Oscar\\OneDrive\\UCL\\code\\WeightedLD')
 
 
 ### modifications
-minACGT = 0.95   # Minimum fractions of ACTG at a given site for the site to be included in calculation. increase this to remove more noise say 0.5
+minACGT = 1.00   # Minimum fractions of ACTG at a given site for the site to be included in calculation. increase this to remove more noise say 0.5
 ### end
 
 # handle args
 #msa = sys.argv[0]
 # alignmentFile = "all_raw_best_msa_man4.fasta"
-#alignmentFile = "test.fasta"
-alignmentFile = "all_raw_best_msa_man4.fasta"
+alignmentFile = "test.fasta"
+#alignmentFile = "all_raw_best_msa_man4.fasta"
 
 
 
@@ -35,12 +35,12 @@ class MSA:
     # make the numeric array small that int23, memory efficient for larger alignments
     # henikoff weighting
     # make var sites integer
-    def __init__(self, alignmentFile):
+    def __init__(self, alignmentFile, minACGT):
         self.alignment = AlignIO.read(alignmentFile, "fasta")
         self.nSeqs = len(self.alignment)
         self.nSites = self.alignment.get_alignment_length()
         self.alignment_array = self.alignment2alignment_array(self.alignment)
-        self.var_sites = self.which_pos_var(self.alignment_array, self.nSites)
+        self.var_sites = self.which_pos_var()
         #self.weighting = self.henikoff_weighting(self)
         # LD will be called separately
     
@@ -68,15 +68,19 @@ class MSA:
         return alignment_array
             
     
-    def which_pos_var(self, alignment_array, nSites):
+    def which_pos_var(self):
         # in
             # alignment array
+        # ignores sites where min ACTG fraction not met
         # out
             # vector of variable position ignore character 4
-        which_var = np.zeros(shape=(nSites,1),dtype=(np.int32))
-        for pos in range(0,nSites):
-            #print(pos)
-            a = np.unique(alignment_array[:,pos])
+        which_var = np.zeros(shape=(self.nSites,1),dtype=(np.int32))
+        for pos in range(0,self.nSites):
+            array = self.alignment_array[:,pos]
+            # if is too little information
+            if ( np.count_nonzero(array == 4) / self.nSeqs) > minACGT: # if too many gaps / ambigious
+                continue # goto next
+            a = np.unique(array)
             a = a[a!= 4] # remove the indels
             a = len(a)
             if a > 1:
@@ -146,10 +150,12 @@ class MSA:
     
     def LD(self, weights):
         # generate LD metric D and R2
-        print("posa\tposb\tD\tR2") # stdout headers
+        print("posa\tposb\tD\tD'\tR2") # stdout headers
+        iLoops = 0
         outer_loop = self.var_sites[0:len(self.var_sites)-1]
-        inner_loop = self.var_sites[1:len(self.var_sites)]
         for i in outer_loop:
+            iLoops += 1
+            inner_loop = self.var_sites[iLoops:len(self.var_sites)]
             for j in inner_loop:
                 #print(str(i) + "   " + str(j))
                 # compare each pairwise position
@@ -169,11 +175,13 @@ class MSA:
                 
                 
                 
-                
-                
+                # logic we need to check that there is variability now still within both arrays
+               
                 # first site
                 # find major allele
                 unique_elements, counts_elements = np.unique(i_array, return_counts=True)
+                if len(unique_elements) == 1:
+                    continue
                 major = unique_elements[counts_elements.argmax()] # which value is max
                 i_array = np.where(i_array == major, 1, 0) # if is major value then 1 else 0
                 PA = np.count_nonzero(i_array == 1) / tSeqs
@@ -186,6 +194,8 @@ class MSA:
                 # second site
                 # find major allelle
                 unique_elements, counts_elements = np.unique(j_array, return_counts=True)
+                if len(unique_elements) == 1:
+                    continue
                 major = unique_elements[counts_elements.argmax()] # which is max
                 j_array = np.where(j_array == major, 1, 0) # if is major then
                 PB = np.count_nonzero(j_array == 1) / tSeqs
@@ -204,17 +214,17 @@ class MSA:
                 # observed allele freqs
                 ld_ops = np.zeros(shape=(4),dtype=(np.float32)) # as weighting is fractional
                 for k in range(0,tSeqs): # for each sequence, see which bin it fits in. then rather than inc by 1 . increment by weighting
-                    if i_array[k] == 0 and j_array[k] == 0:
+                    if i_array[k] == 0 and j_array[k] == 0:     #Oab
                         ld_ops[0] = ld_ops[0] + weights[k]
-                    elif i_array[k] == 1 and j_array[k] == 1:
+                    elif i_array[k] == 1 and j_array[k] == 1:   #OAB
                         ld_ops[3] = ld_ops[3] + weights[k]
-                    elif i_array[k] == 0 and j_array[k] == 1:
+                    elif i_array[k] == 0 and j_array[k] == 1:   #OAb
                         ld_ops[1] = ld_ops[1] + weights[k]
-                    elif i_array[k] == 1 and j_array[k] == 0:
+                    elif i_array[k] == 1 and j_array[k] == 0:   #OaB
                         ld_ops[2] = ld_ops[2] + weights[k]
                     else:
                         print(k)
-                    ld_ops = ld_ops / tSeqs
+                ld_ops = ld_ops / tSeqs
                         
                 # the vector is now as in the hahn molpopgen book and can be used to generate D values
                 # ld_ops is pAB, p
@@ -225,7 +235,22 @@ class MSA:
                 tD[3] = abs(ld_ops[1] - PaB) #minMaj
                 
                 D = (tD[0] + tD[1] + tD[2] + tD[3]) / 4     #they should be the same anyhow
-                D = round(D, 6)
+                
+                
+                
+                
+                # normalised D = D'
+                if D < 0:
+                    denominator = max([-ld_ops[0],-ld_ops[3]])
+                    if denominator == 0:
+                        denominator = min([-ld_ops[0],-ld_ops[3]])
+                    DPrime = D / denominator  
+                else:
+                    denominator = min([ld_ops[1],ld_ops[2]])
+                    if denominator == 0:
+                        denominator = max([ld_ops[1],ld_ops[2]])  
+                    DPrime = D / denominator
+                    
                 
                 
                 
@@ -233,17 +258,20 @@ class MSA:
                 R2 = D**2 / ( PA * Pa * PB * Pb )
                 
                 # cat output
-                print(str(i)+"\t"+str(j)+"\t"+str(D)+"\t"+str(R2))
+                print(str(i)+"\t"+str(j)+"\t"+str(round(D, 4))+"\t"+str(round(DPrime, 4))+"\t"+str(round(R2, 4)))
                 
 
 
         
         
-a = MSA(alignmentFile)
+a = MSA(alignmentFile, minACGT)
 
-weights = a.henikoff_weighting()
+weightsHk = a.henikoff_weighting()
 
-#ld = a.LD(weights)
+weights1 =  np.zeros(shape=(a.nSeqs),dtype=(np.uint16()))
+weights1[weights1 == 0] = 1
+weights = weights1
+ld = a.LD(weights1)
     
  
         
