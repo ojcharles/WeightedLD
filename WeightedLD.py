@@ -13,18 +13,12 @@ import os
 import numpy as np
 os.chdir('C:\\Oscar\\OneDrive\\UCL\\code\\WeightedLD')
 
-
-
 ### modifications
 minACGT = 1.00   # Minimum fractions of ACTG at a given site for the site to be included in calculation. increase this to remove more noise say 0.5
-### end
-
-# handle args
 #msa = sys.argv[0]
-# alignmentFile = "all_raw_best_msa_man4.fasta"
-alignmentFile = "test.fasta"
 #alignmentFile = "all_raw_best_msa_man4.fasta"
-
+alignmentFile = "test.fasta"
+### end
 
 
 class MSA:
@@ -32,11 +26,10 @@ class MSA:
     # read alignment
     # generate allelle matrix
     # todo
-    # make the numeric array small that int23, memory efficient for larger alignments
-    # henikoff weighting
-    # make var sites integer
+    # check the LD, the weighted values are all weird and wonderful
     def __init__(self, alignmentFile, minACGT):
         self.alignment = AlignIO.read(alignmentFile, "fasta")
+        self.minACGT = minACGT
         self.nSeqs = len(self.alignment)
         self.nSites = self.alignment.get_alignment_length()
         self.alignment_array = self.alignment2alignment_array(self.alignment)
@@ -46,7 +39,7 @@ class MSA:
     
     
     def alignment2alignment_array(self, alignment):
-        alignment_array = np.array([list(rec) for rec in alignment], np.dtype("U4")) # alignment as matrix
+        alignment_array = np.array([list(rec) for rec in alignment], np.dtype("U4")) # alignment as matrix, of dtype unicode
         alignment_array = alignment_array.astype('U13') #convert from bytecode to character       
         BaseToInt = {
            "A":0,
@@ -62,9 +55,7 @@ class MSA:
            "k":5,"m":5,"n":5,"r":5,"s":5,"v":5,"y":5,"b":5,"w":5,"h":5,"d":5} # ambiguity codes 
         # translate character matrix to integer using dict
         alignment_array = np.vectorize(BaseToInt.get)(alignment_array)
-        
-        #u,inv = np.unique(alignment_array,return_inverse = True)
-        #alignment_array = np.array(BaseToInt.get(x, 5) for x in u])[inv].reshape(alignmen_array.shape)
+        alignment_array = alignment_array.astype(np.uint8()) #convert to 1 byte
         return alignment_array
             
     
@@ -74,14 +65,14 @@ class MSA:
         # ignores sites where min ACTG fraction not met
         # out
             # vector of variable position ignore character 4
-        which_var = np.zeros(shape=(self.nSites,1),dtype=(np.int32))
+        which_var = np.zeros(shape=(self.nSites,1),dtype=(np.uint32))
         for pos in range(0,self.nSites):
             array = self.alignment_array[:,pos]
             # if is too little information
-            if ( np.count_nonzero(array == 4) / self.nSeqs) > minACGT: # if too many gaps / ambigious
+            if ( np.count_nonzero(array >= 4) / self.nSeqs) > minACGT: # if too many gaps / ambigious
                 continue # goto next
             a = np.unique(array)
-            a = a[a!= 4] # remove the indels
+            a = a[a < 4] # remove the indels
             a = len(a)
             if a > 1:
                 which_var[pos] = pos
@@ -106,7 +97,7 @@ class MSA:
             unique_elements, counts_elements = np.unique(array, return_counts=True)
             okBase = np.in1d(array, okBaseVals)                     # vector of T/F for okayness ignores anythin other than actg-.
             tSeqs = np.count_nonzero(okBase)                        # how many seqs are ok and considered?
-            if ( tSeqs / self.nSeqs ) < minACGT:   #if too many missing vals then go to next
+            if ( tSeqs / self.nSeqs ) < self.minACGT:   #if too many missing vals then go to next
                 continue
             nSitesCounted = nSitesCounted + 1
             countBase = np.zeros(shape=(5),dtype=(np.int16()))
@@ -135,6 +126,7 @@ class MSA:
         
         #---------- normalise
         norm = weights / weights.max()
+        fracOK = fracOK / nSitesCounted
         
         #---------- stdout
         print("seq\tfracOK\tWeight")
@@ -160,19 +152,20 @@ class MSA:
                 #print(str(i) + "   " + str(j))
                 # compare each pairwise position
                 
-                #----- remove any sequences with indel character
+                #----- remove any sequences with indel or illegal character
                 # which index values need removing?
                 i_array = self.alignment_array[:,i]
-                remove = np.where(i_array == 4) # which seqs contain illegal char in i
+                remove = np.where(i_array >= 4) # which seqs contain illegal char in i
                 j_array = self.alignment_array[:,j]
-                remove = np.append(remove,np.where(j_array == 4)) # which sequences in total contain illegals?
+                remove = np.append(remove,np.where(j_array >= 4)) # which sequences in total contain illegals?
                 remove = np.unique(remove)
                 
                 # remove any sequence as identified above, which contained a illegal in i or j
                 i_array = np.delete(i_array, remove)
                 j_array = np.delete(j_array, remove)
                 tSeqs = len(i_array) # for this comparison, how many seqs are there?
-                
+                # now so long as i delete the save indexes from weights im ok
+                tWeights = np.delete(weights, remove)
                 
                 
                 # logic we need to check that there is variability now still within both arrays
@@ -184,9 +177,12 @@ class MSA:
                     continue
                 major = unique_elements[counts_elements.argmax()] # which value is max
                 i_array = np.where(i_array == major, 1, 0) # if is major value then 1 else 0
-                PA = np.count_nonzero(i_array == 1) / tSeqs
-                Pa = np.count_nonzero(i_array == 0) / tSeqs
-                
+
+                # rather than count, here we need to sum the weights. i.e. weights[np.which == 1]
+                #PA = np.count_nonzero(i_array == 1) / tSeqs
+                #Pa = np.count_nonzero(i_array == 0) / tSeqs
+                PA = sum(tWeights[i_array == 1]) / tSeqs
+                Pa = sum(tWeights[i_array == 0]) / tSeqs
                 
                 
                 
@@ -198,8 +194,10 @@ class MSA:
                     continue
                 major = unique_elements[counts_elements.argmax()] # which is max
                 j_array = np.where(j_array == major, 1, 0) # if is major then
-                PB = np.count_nonzero(j_array == 1) / tSeqs
-                Pb = np.count_nonzero(j_array == 0) / tSeqs
+                #PB = np.count_nonzero(j_array == 1) / tSeqs
+                #Pb = np.count_nonzero(j_array == 0) / tSeqs
+                PB = sum(tWeights[j_array == 1]) / tSeqs
+                Pb = sum(tWeights[j_array == 1]) / tSeqs
                 
                 
                 # predicted allele freqs if in equilibrium
@@ -215,13 +213,13 @@ class MSA:
                 ld_ops = np.zeros(shape=(4),dtype=(np.float32)) # as weighting is fractional
                 for k in range(0,tSeqs): # for each sequence, see which bin it fits in. then rather than inc by 1 . increment by weighting
                     if i_array[k] == 0 and j_array[k] == 0:     #Oab
-                        ld_ops[0] = ld_ops[0] + weights[k]
+                        ld_ops[0] = ld_ops[0] + tWeights[k]
                     elif i_array[k] == 1 and j_array[k] == 1:   #OAB
-                        ld_ops[3] = ld_ops[3] + weights[k]
+                        ld_ops[3] = ld_ops[3] + tWeights[k]
                     elif i_array[k] == 0 and j_array[k] == 1:   #OAb
-                        ld_ops[1] = ld_ops[1] + weights[k]
+                        ld_ops[1] = ld_ops[1] + tWeights[k]
                     elif i_array[k] == 1 and j_array[k] == 0:   #OaB
-                        ld_ops[2] = ld_ops[2] + weights[k]
+                        ld_ops[2] = ld_ops[2] + tWeights[k]
                     else:
                         print(k)
                 ld_ops = ld_ops / tSeqs
