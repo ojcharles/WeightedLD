@@ -170,43 +170,37 @@ class MSA:
                 # now so long as i delete the save indexes from weights im ok
                 tWeights = np.delete(weights, remove)
                 
+                
+                
                
+                
+                # ----- Find and Assign Major / Minor Allele
                 # first site
-                # find major allele
                 unique_elements, counts_elements = np.unique(i_array, return_counts=True)
                 if len(unique_elements) == 1: # is the site still variable after removing?
                     continue
                 major = unique_elements[counts_elements.argmax()] # which value is max
                 i_array = np.where(i_array == major, 1, 0) # if is major value then 1 else 0
-
+                
                 # rather than count, here we need to sum the weights. i.e. weights[np.which == 1]
-                PA = sum(tWeights[i_array == 1]) / tSeqs # div by su of weights for all seqs
-                Pa = sum(tWeights[i_array == 0]) / tSeqs
-                
-                
-                
+                PA = sum(tWeights[i_array == 1]) / sum(tWeights) # div by su of weights for all seqs
+                Pa = sum(tWeights[i_array == 0]) / sum(tWeights)
                 
                 # second site
-                # find major allelle
                 unique_elements, counts_elements = np.unique(j_array, return_counts=True)
                 if len(unique_elements) == 1: # is the site still variable after removing?
                     continue
                 major = unique_elements[counts_elements.argmax()] # which is max
                 j_array = np.where(j_array == major, 1, 0) # if is major then
-                PB = sum(tWeights[j_array == 1]) / tSeqs
-                Pb = sum(tWeights[j_array == 0]) / tSeqs
                 
-                
-                # predicted allele freqs if in equilibrium
-                PAB = PA * PB
-                PAb = PA * Pb
-                PaB = Pa * PB
-                Pab = Pa * Pb
-        
+                PB = sum(tWeights[j_array == 1]) / sum(tWeights)
+                Pb = sum(tWeights[j_array == 0]) / sum(tWeights)
                 
                 
                 
-                # observed allele freqs
+                
+                
+                # ----- observed allelle frequencies
                 ld_ops = np.zeros(shape=(4),dtype=(np.float32)) # as weighting is fractional
                 for k in range(0,tSeqs): # for each sequence, see which bin it fits in. then rather than inc by 1 . increment by weighting
                     if i_array[k] == 0 and j_array[k] == 0:     #Oab
@@ -219,8 +213,23 @@ class MSA:
                         ld_ops[2] = ld_ops[2] + tWeights[k]
                     else:
                         print(k)
-                ld_ops = ld_ops / tSeqs
+                ld_ops = ld_ops / sum(tWeights)
+                
+                
+                
+                
+                
+                # ----- predicted allele freqs if 0 LD
+                PAB = PA * PB
+                PAb = PA * Pb
+                PaB = Pa * PB
+                Pab = Pa * Pb
+                
+                            
                         
+                            
+                
+                # ----- Caclulate D [Linkage Disequilibrium]
                 # the vector is now as in the hahn molpopgen book and can be used to generate D values
                 # ld_ops is pAB, p
                 tD = np.zeros(shape=(4),dtype=(np.float32))
@@ -230,7 +239,6 @@ class MSA:
                 tD[3] = abs(ld_ops[1] - PaB) #minMaj
                 
                 D = (tD[0] + tD[1] + tD[2] + tD[3]) / 4     #they should be the same anyhow
-                
                 
                 
                 
