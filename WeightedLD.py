@@ -17,7 +17,8 @@ os.chdir('C:\\Oscar\\OneDrive\\UCL\\code\\WeightedLD')
 minACGT = 1.00   # Minimum fractions of ACTG at a given site for the site to be included in calculation. increase this to remove more noise say 0.5
 #msa = sys.argv[0]
 #alignmentFile = "all_raw_best_msa_man4.fasta"
-alignmentFile = "test2.fasta"
+#alignmentFile = "test_weights1_LD0.fasta"
+alignmentFile = "test_weights1_hahn1.fasta"
 ### end
 
 
@@ -169,21 +170,17 @@ class MSA:
                 # now so long as i delete the save indexes from weights im ok
                 tWeights = np.delete(weights, remove)
                 
-                
-                # logic we need to check that there is variability now still within both arrays
                
                 # first site
                 # find major allele
                 unique_elements, counts_elements = np.unique(i_array, return_counts=True)
-                if len(unique_elements) == 1:
+                if len(unique_elements) == 1: # is the site still variable after removing?
                     continue
                 major = unique_elements[counts_elements.argmax()] # which value is max
                 i_array = np.where(i_array == major, 1, 0) # if is major value then 1 else 0
 
                 # rather than count, here we need to sum the weights. i.e. weights[np.which == 1]
-                #PA = np.count_nonzero(i_array == 1) / tSeqs
-                #Pa = np.count_nonzero(i_array == 0) / tSeqs
-                PA = sum(tWeights[i_array == 1]) / tSeqs
+                PA = sum(tWeights[i_array == 1]) / tSeqs # div by su of weights for all seqs
                 Pa = sum(tWeights[i_array == 0]) / tSeqs
                 
                 
@@ -192,14 +189,12 @@ class MSA:
                 # second site
                 # find major allelle
                 unique_elements, counts_elements = np.unique(j_array, return_counts=True)
-                if len(unique_elements) == 1:
+                if len(unique_elements) == 1: # is the site still variable after removing?
                     continue
                 major = unique_elements[counts_elements.argmax()] # which is max
                 j_array = np.where(j_array == major, 1, 0) # if is major then
-                #PB = np.count_nonzero(j_array == 1) / tSeqs
-                #Pb = np.count_nonzero(j_array == 0) / tSeqs
                 PB = sum(tWeights[j_array == 1]) / tSeqs
-                Pb = sum(tWeights[j_array == 1]) / tSeqs
+                Pb = sum(tWeights[j_array == 0]) / tSeqs
                 
                 
                 # predicted allele freqs if in equilibrium
