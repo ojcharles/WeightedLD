@@ -17,7 +17,7 @@ os.chdir('C:\\Oscar\\OneDrive\\UCL\\code\\WeightedLD')
 minACGT = 1.00   # Minimum fractions of ACTG at a given site for the site to be included in calculation. increase this to remove more noise say 0.5
 #msa = sys.argv[0]
 #alignmentFile = "all_raw_best_msa_man4.fasta"
-alignmentFile = "test.fasta"
+alignmentFile = "test2.fasta"
 ### end
 
 
@@ -65,7 +65,7 @@ class MSA:
         # ignores sites where min ACTG fraction not met
         # out
             # vector of variable position ignore character 4
-        which_var = np.zeros(shape=(self.nSites,1),dtype=(np.uint32))
+        which_var = np.zeros(shape=(self.nSites),dtype=(np.uint8))
         for pos in range(0,self.nSites):
             array = self.alignment_array[:,pos]
             # if is too little information
@@ -75,10 +75,10 @@ class MSA:
             a = a[a < 4] # remove the indels
             a = len(a)
             if a > 1:
-                which_var[pos] = pos
-        out = which_var[which_var != 0] 
-        return out
-
+                which_var[pos] = 1
+        out = np.where(which_var == 1) # vector of 0 and 1 ->  index of var pos
+        return out[0] # force return 1darray
+    
     
     def henikoff_weighting(self):
         # todo treat val of 4 as not ok.
@@ -93,6 +93,7 @@ class MSA:
         
         #---------- loop over each site, and for each seq keep tally of cumulative weighting
         for iSite in self.var_sites:                                   # for each variable site
+            #print(iSite)
             array = self.alignment_array[:,iSite]                      # the already converted array i.e. actg--> 01234
             unique_elements, counts_elements = np.unique(array, return_counts=True)
             okBase = np.in1d(array, okBaseVals)                     # vector of T/F for okayness ignores anythin other than actg-.
@@ -145,6 +146,7 @@ class MSA:
         print("posa\tposb\tD\tD'\tR2") # stdout headers
         iLoops = 0
         outer_loop = self.var_sites[0:len(self.var_sites)-1]
+        print(self.var_sites)
         for i in outer_loop:
             iLoops += 1
             inner_loop = self.var_sites[iLoops:len(self.var_sites)]
@@ -269,7 +271,7 @@ weightsHk = a.henikoff_weighting()
 weights1 =  np.zeros(shape=(a.nSeqs),dtype=(np.uint16()))
 weights1[weights1 == 0] = 1
 weights = weights1
-ld = a.LD(weights1)
+ld = a.LD(weightsHk)
     
  
         
