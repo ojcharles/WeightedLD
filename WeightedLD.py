@@ -1,5 +1,5 @@
 # Oscar Charles 210404
-# #Steven Henikoff and Jorja G. Henikoff (1994) "Position-based Sequence Weights" 
+# Steven Henikoff and Jorja G. Henikoff (1994) "Position-based Sequence Weights" 
 # using matt hahn molpopgen book
 # This code calculates sequence weights using the Henikoff formula from a multiple sequuence alignment
 # usage python WeightedLD.py alignment.fasta
@@ -14,11 +14,11 @@ import numpy as np
 os.chdir('C:\\Oscar\\OneDrive\\UCL\\code\\WeightedLD')
 
 ### modifications
-minACGT = 1.00   # Minimum fractions of ACTG at a given site for the site to be included in calculation. increase this to remove more noise say 0.5
+minACGT = 0.20   # Minimum fractions of ACTG at a given site for the site to be included in calculation. increase this to remove more noise say 0.5
 #msa = sys.argv[0]
 #alignmentFile = "all_raw_best_msa_man4.fasta"
 #alignmentFile = "test_weights1_LD0.fasta"
-alignmentFile = "test_weights1_hahn1.fasta"
+alignmentFile = "test_weights1_hahn2.fasta"
 ### end
 
 
@@ -52,8 +52,8 @@ class MSA:
            "T":3,
            "t":3,
            "-":4,
-           ".":4,
-           "k":5,"m":5,"n":5,"r":5,"s":5,"v":5,"y":5,"b":5,"w":5,"h":5,"d":5} # ambiguity codes 
+           #".":4,- pref behaviour is throw an error
+           "k":5,"m":5,"n":5,"r":5,"s":5,"v":5,"y":5,"b":5,"w":5,"h":5,"d":5} # ambiguity codes - impute N or mean score
         # translate character matrix to integer using dict
         alignment_array = np.vectorize(BaseToInt.get)(alignment_array)
         alignment_array = alignment_array.astype(np.uint8()) #convert to 1 byte
@@ -70,7 +70,8 @@ class MSA:
         for pos in range(0,self.nSites):
             array = self.alignment_array[:,pos]
             # if is too little information
-            if ( np.count_nonzero(array >= 4) / self.nSeqs) > minACGT: # if too many gaps / ambigious
+            if ( np.count_nonzero(array >= 4) / self.nSeqs) > minACGT: # if too many gaps / ambigious.
+                # //todo try something reasonable
                 continue # goto next
             a = np.unique(array)
             a = a[a < 4] # remove the indels
@@ -90,7 +91,7 @@ class MSA:
         weights = np.zeros(shape=(self.nSeqs),dtype=(np.float32()))    # the output
         fracOK = np.zeros(shape=(self.nSeqs),dtype=(np.float32()))     
         nSitesCounted = 0                                           # we might not count all sites in the weighting
-        okBaseVals = [0,1,2,3]                                      # which values are ok
+        okBaseVals = [0,1,2,3,4]                                      # which values are ok
         
         #---------- loop over each site, and for each seq keep tally of cumulative weighting
         for iSite in self.var_sites:                                   # for each variable site
@@ -98,17 +99,17 @@ class MSA:
             array = self.alignment_array[:,iSite]                      # the already converted array i.e. actg--> 01234
             unique_elements, counts_elements = np.unique(array, return_counts=True)
             okBase = np.in1d(array, okBaseVals)                     # vector of T/F for okayness ignores anythin other than actg-.
-            tSeqs = np.count_nonzero(okBase)                        # how many seqs are ok and considered?
-            if ( tSeqs / self.nSeqs ) < self.minACGT:   #if too many missing vals then go to next
-                continue
+            #tSeqs = np.count_nonzero(okBase)                        # how many seqs are ok and considered?
             nSitesCounted = nSitesCounted + 1
             countBase = np.zeros(shape=(5),dtype=(np.int16()))
             countBase[0] = np.count_nonzero(array == 0)
             countBase[1] = np.count_nonzero(array == 1)
             countBase[2] = np.count_nonzero(array == 2)
             countBase[3] = np.count_nonzero(array == 3)
-            # countBase[4] = np.count_nonzero(array == 4)
-            # nRealBase = countBase0 + countBase1 + countBase2 + countBase3  //todo same as tSeq
+            countBase[4] = np.count_nonzero(array == 4) # oscar just assume this is working out for 5 bases not 4.
+            tSeqs = countBase[0] + countBase[1] + countBase[2] + countBase[3] + countBase[4]  # //todo same as tSeq
+            if ( ( tSeqs - countBase[4] ) / self.nSeqs ) < self.minACGT:   #if too many missing vals then go to next
+                continue
             avgWeight = np.zeros(shape=(2),dtype=(np.float32()))
             for iSeq in range(0,self.nSeqs):  # //todo update this so that it defulats to 0 and only checks okbases
                 if okBase[iSeq]: # calculate the site contribution
@@ -120,6 +121,7 @@ class MSA:
                     fracOK[iSeq] = fracOK[iSeq] + 1
                 
             avgWeight[0] =  avgWeight[0] / avgWeight[1]
+            # give any imbigious charcters the mean weighting score
             for iSeq in range(0,self.nSeqs):   # if not okbase, give it the average for this pos
                 if not okBase[iSeq]: 
                     weights[iSeq] += avgWeight[0]
@@ -270,7 +272,6 @@ class MSA:
 a = MSA(alignmentFile, minACGT)
 
 weightsHk = a.henikoff_weighting()
-
 weights1 =  np.zeros(shape=(a.nSeqs),dtype=(np.uint16()))
 weights1[weights1 == 0] = 1
 weights = weights1
