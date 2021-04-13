@@ -1,0 +1,14 @@
+name: py3
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.7
+  - spyder=4
+  - numpy
+  - tensorflow
+  - keras
+  - biopython
+  - scikit-learn
+  - spyder-kernels
+prefix: C:\Oscar\apps\conda3\envs\py3
