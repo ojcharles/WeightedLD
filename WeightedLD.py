@@ -14,10 +14,8 @@ import numpy as np
 os.chdir('C:\\Oscar\\OneDrive\\UCL\\code\\WeightedLD')
 
 ### modifications
-minACGT = 0.20   # Minimum fractions of ACTG at a given site for the site to be included in calculation. increase this to remove more noise say 0.5
+minACGT = 0.80   # Minimum fractions of ACTG at a given site for the site to be included in calculation. increase this to remove more noise say 0.5
 #msa = sys.argv[0]
-#alignmentFile = "all_raw_best_msa_man4.fasta"
-#alignmentFile = "test_weights1_LD0.fasta"
 alignmentFile = "test_weights1_hahn2.fasta"
 ### end
 
@@ -99,15 +97,14 @@ class MSA:
             array = self.alignment_array[:,iSite]                      # the already converted array i.e. actg--> 01234
             unique_elements, counts_elements = np.unique(array, return_counts=True)
             okBase = np.in1d(array, okBaseVals)                     # vector of T/F for okayness ignores anythin other than actg-.
-            #tSeqs = np.count_nonzero(okBase)                        # how many seqs are ok and considered?
             nSitesCounted = nSitesCounted + 1
             countBase = np.zeros(shape=(5),dtype=(np.int16()))
             countBase[0] = np.count_nonzero(array == 0)
             countBase[1] = np.count_nonzero(array == 1)
             countBase[2] = np.count_nonzero(array == 2)
             countBase[3] = np.count_nonzero(array == 3)
-            countBase[4] = np.count_nonzero(array == 4) # oscar just assume this is working out for 5 bases not 4.
-            tSeqs = countBase[0] + countBase[1] + countBase[2] + countBase[3] + countBase[4]  # //todo same as tSeq
+            countBase[4] = np.count_nonzero(array == 4)
+            tSeqs = countBase[0] + countBase[1] + countBase[2] + countBase[3] + countBase[4]
             if ( ( tSeqs - countBase[4] ) / self.nSeqs ) < self.minACGT:   #if too many missing vals then go to next
                 continue
             avgWeight = np.zeros(shape=(2),dtype=(np.float32()))
@@ -120,7 +117,7 @@ class MSA:
                     avgWeight[1] = avgWeight[1] + 1
                     fracOK[iSeq] = fracOK[iSeq] + 1
                 
-            avgWeight[0] =  avgWeight[0] / avgWeight[1]
+            avgWeight[0] =  avgWeight[0] / avgWeight[1] # sum(weights) / n(weights) - mean(weight)
             # give any imbigious charcters the mean weighting score
             for iSeq in range(0,self.nSeqs):   # if not okbase, give it the average for this pos
                 if not okBase[iSeq]: 
@@ -203,19 +200,19 @@ class MSA:
                 
                 
                 # ----- observed allelle frequencies
-                ld_ops = np.zeros(shape=(4),dtype=(np.float32)) # as weighting is fractional
+                ld_obs = np.zeros(shape=(4),dtype=(np.float32)) # as weighting is fractional
                 for k in range(0,tSeqs): # for each sequence, see which bin it fits in. then rather than inc by 1 . increment by weighting
                     if i_array[k] == 0 and j_array[k] == 0:     #Oab
-                        ld_ops[0] = ld_ops[0] + tWeights[k]
+                        ld_obs[0] = ld_obs[0] + tWeights[k]
                     elif i_array[k] == 1 and j_array[k] == 1:   #OAB
-                        ld_ops[3] = ld_ops[3] + tWeights[k]
+                        ld_obs[3] = ld_obs[3] + tWeights[k]
                     elif i_array[k] == 0 and j_array[k] == 1:   #OAb
-                        ld_ops[1] = ld_ops[1] + tWeights[k]
+                        ld_obs[1] = ld_obs[1] + tWeights[k]
                     elif i_array[k] == 1 and j_array[k] == 0:   #OaB
-                        ld_ops[2] = ld_ops[2] + tWeights[k]
+                        ld_obs[2] = ld_obs[2] + tWeights[k]
                     else:
                         print(k)
-                ld_ops = ld_ops / sum(tWeights)
+                ld_obs = ld_obs / sum(tWeights)
                 
                 
                 
@@ -227,18 +224,18 @@ class MSA:
                 PaB = Pa * PB
                 Pab = Pa * Pb
                 
-                            
-                        
-                            
                 
+                
+                
+
                 # ----- Caclulate D [Linkage Disequilibrium]
                 # the vector is now as in the hahn molpopgen book and can be used to generate D values
-                # ld_ops is pAB, p
+                # ld_obs is pAB, p
                 tD = np.zeros(shape=(4),dtype=(np.float32))
-                tD[0] = abs(ld_ops[3] - PAB) # MajMaj
-                tD[1] = abs(ld_ops[0] - Pab) # minmin  
-                tD[2] = abs(ld_ops[2] - PAb) #Majmin
-                tD[3] = abs(ld_ops[1] - PaB) #minMaj
+                tD[0] = abs(ld_obs[3] - PAB) # MajMaj
+                tD[1] = abs(ld_obs[0] - Pab) # minmin  
+                tD[2] = abs(ld_obs[2] - PAb) #Majmin
+                tD[3] = abs(ld_obs[1] - PaB) #minMaj
                 
                 D = (tD[0] + tD[1] + tD[2] + tD[3]) / 4     #they should be the same anyhow
                 
@@ -246,14 +243,14 @@ class MSA:
                 
                 # normalised D = D'
                 if D < 0:
-                    denominator = max([-ld_ops[0],-ld_ops[3]])
+                    denominator = max([-ld_obs[0],-ld_obs[3]])
                     if denominator == 0:
-                        denominator = min([-ld_ops[0],-ld_ops[3]])
+                        denominator = min([-ld_obs[0],-ld_obs[3]])
                     DPrime = D / denominator  
                 else:
-                    denominator = min([ld_ops[1],ld_ops[2]])
+                    denominator = min([ld_obs[1],ld_obs[2]])
                     if denominator == 0:
-                        denominator = max([ld_ops[1],ld_ops[2]])  
+                        denominator = max([ld_obs[1],ld_obs[2]])  
                     DPrime = D / denominator
                     
                 
@@ -276,6 +273,3 @@ weights1 =  np.zeros(shape=(a.nSeqs),dtype=(np.uint16()))
 weights1[weights1 == 0] = 1
 weights = weights1
 ld = a.LD(weightsHk)
-    
- 
-        
