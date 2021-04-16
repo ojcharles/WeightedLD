@@ -11,12 +11,12 @@
 from Bio import AlignIO
 import os
 import numpy as np
-os.chdir('C:\\Oscar\\OneDrive\\UCL\\code\\WeightedLD')
+os.chdir('C:\\Oscar\\OneDrive\\UCL\\21-4_weightedLD')
 
 ### modifications
 minACGT = 0.80   # Minimum fractions of ACTG at a given site for the site to be included in calculation. increase this to remove more noise say 0.5
 #msa = sys.argv[0]
-alignmentFile = "test_weights1_hahn2.fasta"
+alignmentFile = "test.fasta"
 ### end
 
 
@@ -29,7 +29,7 @@ class MSA:
     def __init__(self, alignmentFile, minACGT):
         self.alignment = AlignIO.read(alignmentFile, "fasta")
         self.minACGT = minACGT
-        self.nSeqs = len(self.alignment)
+        self.nSeqs = np.uint64(len(self.alignment))
         self.nSites = self.alignment.get_alignment_length()
         self.alignment_array = self.alignment2alignment_array(self.alignment)
         self.var_sites = self.which_pos_var()
@@ -64,7 +64,7 @@ class MSA:
         # ignores sites where min ACTG fraction not met
         # out
             # vector of variable position ignore character 4
-        which_var = np.zeros(shape=(self.nSites),dtype=(np.uint8))
+        which_var = np.zeros(shape=(self.nSites),dtype=(np.uint64))
         for pos in range(0,self.nSites):
             array = self.alignment_array[:,pos]
             # if is too little information
@@ -98,7 +98,7 @@ class MSA:
             unique_elements, counts_elements = np.unique(array, return_counts=True)
             okBase = np.in1d(array, okBaseVals)                     # vector of T/F for okayness ignores anythin other than actg-.
             nSitesCounted = nSitesCounted + 1
-            countBase = np.zeros(shape=(5),dtype=(np.int16()))
+            countBase = np.zeros(shape=(5),dtype=(np.int64()))
             countBase[0] = np.count_nonzero(array == 0)
             countBase[1] = np.count_nonzero(array == 1)
             countBase[2] = np.count_nonzero(array == 2)
@@ -107,21 +107,24 @@ class MSA:
             tSeqs = countBase[0] + countBase[1] + countBase[2] + countBase[3] + countBase[4]
             if ( ( tSeqs - countBase[4] ) / self.nSeqs ) < self.minACGT:   #if too many missing vals then go to next
                 continue
-            avgWeight = np.zeros(shape=(2),dtype=(np.float32()))
+            sumSiteWeight = np.uint64(0.0) # for this site whats the total weight applied to all ok seqs?
             for iSeq in range(0,self.nSeqs):  # //todo update this so that it defulats to 0 and only checks okbases
                 if okBase[iSeq]: # calculate the site contribution
                     iSeq_base = array[iSeq]
-                    siteContribution = 1.0/(tSeqs * countBase[iSeq_base]);  # key    contribution to the weight from this site, this is the henikoff
+                    siteDenom = np.uint64(tSeqs * countBase[iSeq_base])
+                    siteContribution = np.float64(1.0/(siteDenom))  # key    contribution to the weight from this site, this is the henikoff
                     weights[iSeq] = weights[iSeq] + siteContribution        # Key    For this seq, keep a tab of its cumulative weight over all sites
-                    avgWeight[0] = avgWeight[0] + siteContribution
-                    avgWeight[1] = avgWeight[1] + 1
+                    sumSiteWeight = sumSiteWeight + siteContribution
                     fracOK[iSeq] = fracOK[iSeq] + 1
+                    if iSeq == 0:
+                        print(iSite, siteContribution)
                 
-            avgWeight[0] =  avgWeight[0] / avgWeight[1] # sum(weights) / n(weights) - mean(weight)
+            avgWeight =  sumSiteWeight / tSeqs # sum(weights) / n(weights) - mean(weight)
+            
             # give any imbigious charcters the mean weighting score
             for iSeq in range(0,self.nSeqs):   # if not okbase, give it the average for this pos
                 if not okBase[iSeq]: 
-                    weights[iSeq] += avgWeight[0]
+                    weights[iSeq] += avgWeight
         # end of loop over sites
         
         
@@ -272,4 +275,4 @@ weightsHk = a.henikoff_weighting()
 weights1 =  np.zeros(shape=(a.nSeqs),dtype=(np.uint16()))
 weights1[weights1 == 0] = 1
 weights = weights1
-ld = a.LD(weightsHk)
+#ld = a.LD(weightsHk)
