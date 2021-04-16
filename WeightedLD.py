@@ -1,4 +1,4 @@
-# Oscar Charles 210404
+m# Oscar Charles 210404
 # Steven Henikoff and Jorja G. Henikoff (1994) "Position-based Sequence Weights" 
 # using matt hahn molpopgen book
 # This code calculates sequence weights using the Henikoff formula from a multiple sequuence alignment
@@ -9,14 +9,11 @@
 # LD - why are some values being returned infinte?
 
 from Bio import AlignIO
-import os
 import numpy as np
-os.chdir('C:\\Oscar\\OneDrive\\UCL\\21-4_weightedLD')
-
 ### modifications
 minACGT = 0.80   # Minimum fractions of ACTG at a given site for the site to be included in calculation. increase this to remove more noise say 0.5
 #msa = sys.argv[0]
-alignmentFile = "test.fasta"
+alignmentFile = "example.fasta"
 ### end
 
 
