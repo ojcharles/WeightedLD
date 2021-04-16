@@ -116,8 +116,6 @@ class MSA:
                     weights[iSeq] = weights[iSeq] + siteContribution        # Key    For this seq, keep a tab of its cumulative weight over all sites
                     sumSiteWeight = sumSiteWeight + siteContribution
                     fracOK[iSeq] = fracOK[iSeq] + 1
-                    if iSeq == 0:
-                        print(iSite, siteContribution)
                 
             avgWeight =  sumSiteWeight / tSeqs # sum(weights) / n(weights) - mean(weight)
             
@@ -235,11 +233,14 @@ class MSA:
                 # the vector is now as in the hahn molpopgen book and can be used to generate D values
                 # ld_obs is pAB, p
                 tD = np.zeros(shape=(4),dtype=(np.float32))
-                tD[0] = abs(ld_obs[3] - PAB) # MajMaj
-                tD[1] = abs(ld_obs[0] - Pab) # minmin  
-                tD[2] = abs(ld_obs[2] - PAb) #Majmin
-                tD[3] = abs(ld_obs[1] - PaB) #minMaj
-                
+                #tD[0] = abs(ld_obs[3] - PAB) # MajMaj
+                #tD[1] = abs(ld_obs[0] - Pab) # minmin  
+                #tD[2] = abs(ld_obs[2] - PAb) #Majmin
+                #tD[3] = abs(ld_obs[1] - PaB) #minMaj
+                tD[0] = PAB - ld_obs[3] # MajMaj
+                tD[1] = Pab - ld_obs[0] # minmin  
+                tD[2] = -1 * (PAb - ld_obs[2]) #Majmin
+                tD[3] = -1 * (PaB - ld_obs[1]) #minMaj
                 D = (tD[0] + tD[1] + tD[2] + tD[3]) / 4     #they should be the same anyhow
                 
                 
@@ -249,12 +250,11 @@ class MSA:
                     denominator = max([-ld_obs[0],-ld_obs[3]])
                     if denominator == 0:
                         denominator = min([-ld_obs[0],-ld_obs[3]])
-                    DPrime = D / denominator  
                 else:
                     denominator = min([ld_obs[1],ld_obs[2]])
                     if denominator == 0:
                         denominator = max([ld_obs[1],ld_obs[2]])  
-                    DPrime = D / denominator
+                DPrime = D / denominator
                     
                 
                 
@@ -275,4 +275,4 @@ weightsHk = a.henikoff_weighting()
 weights1 =  np.zeros(shape=(a.nSeqs),dtype=(np.uint16()))
 weights1[weights1 == 0] = 1
 weights = weights1
-#ld = a.LD(weightsHk)
+ld = a.LD(weights1)
