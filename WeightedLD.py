@@ -28,9 +28,9 @@ def read_fasta(filename: Path) -> np.ndarray:
     return helper.multiseq_to_arr(raw_alignment)
 
 
-def compute_variable_sites(alignment: np.ndarray, min_acgt: float) -> np.ndarray:
+def compute_variable_sites(alignment: np.ndarray, min_acgt: float, min_variability: float) -> np.ndarray:
     """
-    Which sites have both sufficient data and multiple non-ambiguous symbols.
+    Which sites have both sufficient data and a significant enough quantity of a minor symbol
 
     Args:
         alignment: 2D numpy array where:
@@ -40,6 +40,9 @@ def compute_variable_sites(alignment: np.ndarray, min_acgt: float) -> np.ndarray
               represented by (0, 1, 2, 3, 4, 5)
         min_acgt: The minimum fraction of sequences which must have A/C/G/T
             symbols at a given site
+        min_variability: The minimum fraction of sequences which have the minor
+            symbol at a given site, ignoring sequences that have missing or
+            ambiguous symbols.
 
     Returns:
         A 1D boolean array of length n_sites, which is True for each site that
@@ -52,13 +55,23 @@ def compute_variable_sites(alignment: np.ndarray, min_acgt: float) -> np.ndarray
     # Whether a given site has enough data to be considered for further processing
     sufficient_data = concrete_fraction > min_acgt
 
-    # For each site, whether any sequence has a given symbol at that position
-    any_acgt = [(alignment == x).any(axis=0) for x in (0, 1, 2, 3)]
+    # For each site, how many sequences have a given symbol at that site
+    acgt_counts = np.array([(alignment == x).sum(axis=0) for x in (0, 1, 2, 3)])
+
+    major_counts = acgt_counts.max(axis=0)
+    minor_counts = acgt_counts.sum(axis=0) - major_counts
+
+    f = minor_counts > 0
+    minor_fraction = np.zeros(alignment.shape[1])
+    minor_fraction[f] = minor_counts[f] / (major_counts[f] + minor_counts[f])
+    
+    # Does the minor symbol occur at a high enough frequency
+    has_min_variability = minor_fraction >= min_variability
     
     # Whether each site has multiple non-ambiguous symbols
-    multiple_non_ambiguous = np.sum(any_acgt, axis=0) > 1
+    multiple_non_ambiguous = np.sum(acgt_counts > 0, axis=0) > 1
     
-    return multiple_non_ambiguous & sufficient_data
+    return multiple_non_ambiguous & sufficient_data & has_min_variability
     
 
 def henikoff_weighting(alignment: np.ndarray) -> np.ndarray:
@@ -214,8 +227,8 @@ def main(args):
     alignment = read_fasta(args.fasta_input)
     logging.info("Finished reading data. Sequence count: %s, Sequence length %s", *alignment.shape)
     
-    logging.info("Computing sites of iterest (min_acgt=%s)", args.min_acgt)
-    var_sites = compute_variable_sites(alignment, args.min_acgt)
+    logging.info("Computing sites of iterest (min_acgt=%s, min_variability=%s)", args.min_acgt, args.min_variability)
+    var_sites = compute_variable_sites(alignment, args.min_acgt, args.min_variability)
     logging.info("Found %s sites of interest", var_sites.sum())
     
     # Trim down the alignment array to only include the sites of interest
@@ -241,6 +254,8 @@ if __name__ == "__main__":
     parser.add_argument("--min-acgt", type=float, default=0.8,
         help="Minimum fractions of ACTG at a given site for the site to be included in calculation.\
             increase this to remove more noise say 0.5")
+    parser.add_argument("--min-variability", type=float, default=0.02,
+        help="Minimum fraction of minor symbols for a site to be considered")
     
     args = parser.parse_args()
     main(args)
