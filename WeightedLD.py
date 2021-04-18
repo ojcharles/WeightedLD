@@ -131,7 +131,7 @@ def ld(alignment, weights, site_map):
     
     # stdout headers
     print("posa\tposb\tD\tD'\tR2")
-    for first_site in range(10):
+    for first_site in range(n_sites - 1):
         logging.info("    Outer loop: %s/%s", first_site, n_sites)
         for second_site in range(first_site + 1, n_sites):
             # Form an array which contains all the sequences, but only the two target sites
