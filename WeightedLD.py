@@ -28,30 +28,37 @@ def read_fasta(filename: Path) -> np.ndarray:
     return helper.multiseq_to_arr(raw_alignment)
 
 
-def which_pos_var(alignment_array, minACGT):
-    # in
-        # alignment array
-    # ignores sites where min ACTG fraction not met
-    # out
-       # vector of variable position ignore character 4
+def compute_variable_sites(alignment: np.ndarray, min_acgt: float) -> np.ndarray:
+    """
+    Which sites have both sufficient data and multiple non-ambiguous symbols.
 
-    nSites = alignment.shape[1]
-    nSeqs = alignment.shape[0]
+    Args:
+        alignment: 2d numpy array where:
+            - The first axis represents sequences
+            - The second axis represents sites
+            - Each element is an integer where (a, c, g, t, -, ambiguous) is
+              represented by (0, 1, 2, 3, 4, 5)
+        min_acgt: The minimum fraction of sequences which must have A/C/G/T
+            symbols at a given site
 
-    which_var = np.zeros(shape=nSites, dtype=np.uint64)
-    for pos in range(nSites):
-        array = alignment_array[:,pos]
-        # if is too little information
-        if (np.count_nonzero(array >= 4) / nSeqs) > minACGT: # if too many gaps / ambigious.
-            # //todo try something reasonable
-            continue # goto next
-        a = np.unique(array)
-        a = a[a < 4] # remove the indels
-        a = len(a)
-        if a > 1:
-            which_var[pos] = 1
-    out = np.where(which_var == 1) # vector of 0 and 1 ->  index of var pos
-    return out[0] # force return 1darray
+    Returns:
+        A 1D boolean array of length n_sites, which is True for each site that
+        meets the criteria
+    """
+    
+    # For each site, the fraction of sequences which have a concrete symbol at that position
+    concrete_fraction = (alignment < 4).sum(axis=0) / alignment.shape[0]
+    
+    # Whether a given site has enough data to be considered for further processing
+    sufficient_data = concrete_fraction > min_acgt
+
+    # For each site, whether any sequence has a given symbol at that position
+    any_acgt = [(alignment == x).any(axis=0) for x in (0, 1, 2, 3)]
+    
+    # Whether each site has multiple non-ambiguous symbols
+    multiple_non_ambiguous = np.sum(any_acgt, axis=0) > 1
+    
+    return multiple_non_ambiguous & sufficient_data
     
     
 def henikoff_weighting(alignment_array, var_sites, minACGT):
@@ -250,7 +257,9 @@ def main(args):
     logging.info("Finished reading data. Sequence count: %s, Sequence length %s", *alignment.shape)
     
     logging.info("Computing sites of iterest (min_acgt=%s)", args.min_acgt)
-    var_sites = which_pos_var(alignment_array, args.min_acgt)
+    var_sites = compute_variable_sites(alignment_array, args.min_acgt)
+    var_sites = np.where(var_sites)[0]
+    logging.info("Found %s sites of interest", len(var_sites))
     
     logging.info("Computing Henikoff weights for each sequence")
     weightsHK = henikoff_weighting(alignment_array, var_sites, args.min_acgt)
