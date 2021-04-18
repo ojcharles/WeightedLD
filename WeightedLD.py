@@ -8,14 +8,18 @@
 # sequence weighting - treat 4 as a not ok character
 # LD - why are some values being returned infinte?
 
+import logging
+import argparse
+
 from Bio import AlignIO
 import numpy as np
 
-### modifications
-minACGT = 0.80   # Minimum fractions of ACTG at a given site for the site to be included in calculation. increase this to remove more noise say 0.5
-#msa = sys.argv[0]
-alignmentFile = "example.fasta"
-### end
+
+logging.basicConfig(
+    format='[%(levelname)s] %(asctime)s %(message)s',
+    level=logging.INFO,
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 
 def alignment2alignment_array(alignment):
@@ -255,18 +259,37 @@ def LD(alignment_array, var_sites, weights, minACGT):
                 
 
 
-def main():
-    alignment = AlignIO.read(alignmentFile, "fasta")
-    alignment_array = alignment2alignment_array(alignment)
-    var_sites = which_pos_var(alignment_array, minACGT)
+def main(args):
+    logging.info("Reading FASTA data from %s", args.fasta_input)
+    alignment = AlignIO.read(args.fasta_input, "fasta")
+    logging.info(
+        "Finished reading data. Sequence count: %s, Sequence length %s",
+        len(alignment), alignment.get_alignment_length()
+    )
     
-    weightsHK = henikoff_weighting(alignment_array, var_sites, minACGT)
+    logging.info("Converting sequence data to numeric array")
+    alignment_array = alignment2alignment_array(alignment)
+
+    logging.info("Computing sites of iterest (min_acgt=%s)", args.min_acgt)
+    var_sites = which_pos_var(alignment_array, args.min_acgt)
+    
+    logging.info("Computing Henikoff weights for each sequence")
+    weightsHK = henikoff_weighting(alignment_array, var_sites, args.min_acgt)
 
     weights1 =  np.zeros(a.nSeqs, dtype=np.uint16)
     weights1[weights1 == 0] = 1
     weights = weights1
     
-    ld = LD(alignment_array, var_sites, weights1, minACGT)
-    
+    logging.info("Computing the LD parameters")
+    ld = LD(alignment_array, var_sites, weights1, args.min_acgt)
+
+
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="WeightedLD computation tool")
+    parser.add_argument("--fasta-input", type=Path, help="The source file to load", required=True)
+    parser.add_argument("--min-acgt", type=float, default=0.8,
+        help="Minimum fractions of ACTG at a given site for the site to be included in calculation.\
+            increase this to remove more noise say 0.5")
+    
+    args = parser.parse_args()
+    main(args)
