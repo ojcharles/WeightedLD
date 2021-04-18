@@ -1,4 +1,4 @@
-m# Oscar Charles 210404
+# Oscar Charles 210404
 # Steven Henikoff and Jorja G. Henikoff (1994) "Position-based Sequence Weights" 
 # using matt hahn molpopgen book
 # This code calculates sequence weights using the Henikoff formula from a multiple sequuence alignment
