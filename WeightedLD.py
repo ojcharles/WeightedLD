@@ -33,10 +33,10 @@ def compute_variable_sites(alignment: np.ndarray, min_acgt: float) -> np.ndarray
     Which sites have both sufficient data and multiple non-ambiguous symbols.
 
     Args:
-        alignment: 2d numpy array where:
+        alignment: 2D numpy array where:
             - The first axis represents sequences
             - The second axis represents sites
-            - Each element is an integer where (a, c, g, t, -, ambiguous) is
+            - Each element is an integer where (A, C, G, T, -, ambiguous) is
               represented by (0, 1, 2, 3, 4, 5)
         min_acgt: The minimum fraction of sequences which must have A/C/G/T
             symbols at a given site
@@ -60,70 +60,52 @@ def compute_variable_sites(alignment: np.ndarray, min_acgt: float) -> np.ndarray
     
     return multiple_non_ambiguous & sufficient_data
     
+
+def henikoff_weighting(alignment: np.ndarray) -> np.ndarray:
+    """
+    The Henikoff weighting for each sequence in the given alignment array.
+
+    Args:
+        alignment: 2D numpy array where:
+            - The first axis represents sequences
+            - The second axis represents sites
+            - Each element is an integer where (A, C, G, T, -, ambiguous) is
+              represented by (0, 1, 2, 3, 4, 5)
+            - Only sites of interest are included
     
-def henikoff_weighting(alignment_array, var_sites, minACGT):
-    # todo treat val of 4 as not ok.
-    # generate arrays of nSeqs
-    # for each pos
-        # sum the weighting to seqs
-    # then normalise
-
-    nSeqs = alignment_array.shape[0]
-    nSites = alignment_array.shape[1]
-
-    weights = np.zeros(nSeqs)    # the output
-    fracOK = np.zeros(nSeqs)     
-    nSitesCounted = 0                                           # we might not count all sites in the weighting
-    okBaseVals = [0,1,2,3,4]                                      # which values are ok
+    Returns:
+        A 1D numpy array of length n_seqs, containing the Henikoff weight of each sequence.
+    """
     
-    #---------- loop over each site, and for each seq keep tally of cumulative weighting
-    for iSite in var_sites:                                   # for each variable site
-        #print(iSite)
-        array = alignment_array[:, iSite]                      # the already converted array i.e. actg--> 01234
-        unique_elements, counts_elements = np.unique(array, return_counts=True)
-        okBase = np.in1d(array, okBaseVals)                     # vector of T/F for okayness ignores anythin other than actg-.
-        nSitesCounted = nSitesCounted + 1
-        countBase = np.zeros(5, dtype=np.int64)
-        countBase[0] = np.count_nonzero(array == 0)
-        countBase[1] = np.count_nonzero(array == 1)
-        countBase[2] = np.count_nonzero(array == 2)
-        countBase[3] = np.count_nonzero(array == 3)
-        countBase[4] = np.count_nonzero(array == 4)
-        tSeqs = countBase[0] + countBase[1] + countBase[2] + countBase[3] + countBase[4]
-        if ((tSeqs - countBase[4]) / nSeqs) < minACGT:   #if too many missing vals then go to next
-            continue
-
-        sumSiteWeight = np.uint64(0.0) # for this site whats the total weight applied to all ok seqs?
-        for iSeq in range(nSeqs):  # //todo update this so that it defulats to 0 and only checks okbases
-            if okBase[iSeq]: # calculate the site contribution
-                iSeq_base = array[iSeq]
-                siteDenom = np.uint64(tSeqs * countBase[iSeq_base])
-                siteContribution = np.float64(1.0/(siteDenom))  # key    contribution to the weight from this site, this is the henikoff
-                weights[iSeq] = weights[iSeq] + siteContribution        # Key    For this seq, keep a tab of its cumulative weight over all sites
-                sumSiteWeight = sumSiteWeight + siteContribution
-                fracOK[iSeq] = fracOK[iSeq] + 1
-            
-        avgWeight =  sumSiteWeight / tSeqs # sum(weights) / n(weights) - mean(weight)
+    n_sites = alignment.shape[1]
+    n_seqs = alignment.shape[0]
+    
+    # Mask for non-ambiguous bases (False where the base is ambiguous)
+    ok_base = (alignment != 5)
+    
+    # For each site, the count of sequences that have a given symbol at that site
+    # Eg count_base[1, 1234] contains the count of sequences that have symbol 1 at site 1234
+    count_base = np.zeros((6, n_sites))
+    for base in range(6):
+        count_base[base, :] = (alignment == base).sum(axis=0)
         
-        # give any imbigious charcters the mean weighting score
-        for iSeq in range(nSeqs):   # if not okbase, give it the average for this pos
-            if not okBase[iSeq]: 
-                weights[iSeq] += avgWeight
-    # end of loop over sites
+    # For each site, the count of sequences with a concrete symbol at that site
+    t_seqs = np.sum(count_base[:5, :], axis=0)
     
+    site_contribution = np.zeros(alignment.shape)
+    site_contribution[ok_base] = 1 / (t_seqs * count_base[alignment, np.arange(n_sites)])[ok_base]
     
-    #---------- normalise
-    norm = weights / weights.max()
-    fracOK = fracOK / nSitesCounted
+    # For each ambiguous base, fill in the average contribution across all
+    # sequences with concrete bases for that site
+    site_contribution[~ok_base] = 0
+    site_average_weight = site_contribution.sum(axis=0) / t_seqs
+    site_contribution[~ok_base] = np.broadcast_to(site_average_weight, site_contribution.shape)[~ok_base]
     
-    #---------- stdout
-    print("seq\tfracOK\tWeight")
-    for iSeq in range(nSeqs):
-        print(str(iSeq) + "\t" + str(fracOK[iSeq]) + "\t" + str(norm[iSeq]))
-        
-    #end
-    print("alles schon")
-    return norm
+    # For each sequence, the sum of contributions from each site
+    weights = site_contribution.sum(axis=1)
+
+    # Normalize such that the largest weight is exactly 1
+    return weights / weights.max()
 
     
 def LD(alignment_array, var_sites, weights, minACGT):
@@ -258,17 +240,18 @@ def main(args):
     
     logging.info("Computing sites of iterest (min_acgt=%s)", args.min_acgt)
     var_sites = compute_variable_sites(alignment_array, args.min_acgt)
-    var_sites = np.where(var_sites)[0]
+    logging.info("Found %s sites of interest", var_sites.sum())
     logging.info("Found %s sites of interest", len(var_sites))
     
     logging.info("Computing Henikoff weights for each sequence")
-    weightsHK = henikoff_weighting(alignment_array, var_sites, args.min_acgt)
+    weightsHK = henikoff_weighting(alignment_array[:, var_sites])
 
     weights1 =  np.zeros(a.nSeqs, dtype=np.uint16)
     weights1[weights1 == 0] = 1
     weights = weights1
     
     logging.info("Computing the LD parameters")
+    var_sites = np.where(var_sites)[0]
     ld = LD(alignment_array, var_sites, weights1, args.min_acgt)
 
 
