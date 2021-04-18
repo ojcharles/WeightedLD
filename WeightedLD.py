@@ -10,9 +10,11 @@
 
 import logging
 import argparse
+from pathlib import Path
 
 from Bio import AlignIO
 import numpy as np
+import weighted_ld_helper as helper
 
 
 logging.basicConfig(
@@ -21,28 +23,11 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 
+def read_fasta(filename: Path) -> np.ndarray:
+    raw_alignment = AlignIO.read(filename, "fasta")
+    return helper.multiseq_to_arr(raw_alignment)
 
-def alignment2alignment_array(alignment):
-    alignment_array = np.array([list(rec) for rec in alignment], np.dtype("U4")) # alignment as matrix, of dtype unicode
-    alignment_array = alignment_array.astype('U13') #convert from bytecode to character       
-    BaseToInt = {
-       "A":0,
-       "a":0,
-       "C":1,
-       "c":1,
-       "G":2,
-       "g":2,
-       "T":3,
-       "t":3,
-       "-":4,
-       #".":4,- pref behaviour is throw an error
-       "k":5,"m":5,"n":5,"r":5,"s":5,"v":5,"y":5,"b":5,"w":5,"h":5,"d":5} # ambiguity codes - impute N or mean score
-    # translate character matrix to integer using dict
-    alignment_array = np.vectorize(BaseToInt.get)(alignment_array)
-    alignment_array = alignment_array.astype(np.uint8()) #convert to 1 byte
-    return alignment_array
-            
-    
+
 def which_pos_var(alignment_array, minACGT):
     # in
         # alignment array
@@ -261,15 +246,9 @@ def LD(alignment_array, var_sites, weights, minACGT):
 
 def main(args):
     logging.info("Reading FASTA data from %s", args.fasta_input)
-    alignment = AlignIO.read(args.fasta_input, "fasta")
-    logging.info(
-        "Finished reading data. Sequence count: %s, Sequence length %s",
-        len(alignment), alignment.get_alignment_length()
-    )
+    alignment_array = read_fasta(args.fasta_input)
+    logging.info("Finished reading data. Sequence count: %s, Sequence length %s", *alignment.shape)
     
-    logging.info("Converting sequence data to numeric array")
-    alignment_array = alignment2alignment_array(alignment)
-
     logging.info("Computing sites of iterest (min_acgt=%s)", args.min_acgt)
     var_sites = which_pos_var(alignment_array, args.min_acgt)
     
