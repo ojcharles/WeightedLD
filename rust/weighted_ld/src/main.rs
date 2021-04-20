@@ -60,7 +60,7 @@ fn write_henikoff_weights(path: &PathBuf, weights: &[f32]) -> Result<(), std::io
 
     writeln!(w, "Sequence_index\thk_weight")?;
     for (idx, weight) in weights.iter().enumerate() {
-        writeln!(w, "{}\t{}", idx, weight)?;
+        writeln!(w, "{}\t{:.3}", idx, weight)?;
     }
 
     Ok(())
@@ -94,7 +94,7 @@ fn write_pair_stats(
 
             writeln!(
                 w,
-                "{}\t{}\t{}\t{}\t{}",
+                "{}\t{}\t{:.3}\t{:.3}\t{:.3}",
                 parent_first_idx, parent_second_idx, ld_stat.d, ld_stat.d_prime, ld_stat.r2
             )?;
 
