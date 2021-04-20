@@ -1,6 +1,6 @@
 use human_format::Formatter;
 use indicatif::{ProgressBar, ProgressStyle};
-use log::{debug, info};
+use log::{debug, info, log_enabled, Level};
 use std::{
     fs::File,
     io::{BufWriter, Write},
@@ -74,10 +74,15 @@ fn write_pair_stats(
     let file = File::create(path)?;
     let mut w = BufWriter::new(file);
 
-    let pb = ProgressBar::new(pairs.len() as u64);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {percent}% ({per_sec} {eta_precise})")
-        .progress_chars("#>-"));
+    let pb = if log_enabled!(Level::Info) {
+        let bar = ProgressBar::new(pairs.len() as u64);
+        bar.set_style(ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {percent}% ({per_sec} {eta_precise})")
+            .progress_chars("#>-"));
+        Some(bar)
+    } else {
+        None
+    };
 
     let mut written = 0u64;
 
@@ -100,7 +105,9 @@ fn write_pair_stats(
 
             written += 1;
             if written % 5000 == 0 {
-                pb.set_position(written);
+                if let Some(pb) = &pb {
+                    pb.set_position(written);
+                }
             }
         }
     }
@@ -109,7 +116,8 @@ fn write_pair_stats(
 }
 
 fn main() -> Result<(), std::io::Error> {
-    env_logger::init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
     let opt = Opt::from_args();
 
     debug!("{:?}", opt);
@@ -128,7 +136,8 @@ fn main() -> Result<(), std::io::Error> {
     let min_acgt = (opt.min_acgt * siteset.n_seqs() as f32).ceil() as u32;
     let min_minor = opt.min_minor;
     let max_minor = opt.max_minor;
-    let filtered_siteset = siteset.filter_by(|s| is_site_of_interest(s, min_acgt, min_minor, max_minor));
+    let filtered_siteset =
+        siteset.filter_by(|s| is_site_of_interest(s, min_acgt, min_minor, max_minor));
     info!(
         "Computed + filtered sites of interest in {:?}",
         sw.elapsed()
@@ -148,17 +157,24 @@ fn main() -> Result<(), std::io::Error> {
     info!("Beginning pairwise weighted LD computation");
     let sw = Instant::now();
     {
-        let pb = ProgressBar::new(pair_store.len() as u64);
-        pb.set_style(ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {percent}% ({per_sec} {eta_precise})")
-            .progress_chars("#>-"));
+        let pb = if log_enabled!(Level::Info) {
+            let bar = ProgressBar::new(pair_store.len() as u64);
+            bar.set_style(ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {percent}% ({per_sec} {eta_precise})")
+                .progress_chars("#>-"));
+            Some(bar)
+        } else {
+            None
+        };
 
         all_weighted_ld_pairs(
             &filtered_siteset,
             &weights_hk,
             &mut pair_store,
             |computed| {
-                pb.set_position(computed as u64);
+                if let Some(pb) = &pb {
+                    pb.set_position(computed as u64);
+                }
             },
         );
     }
