@@ -36,6 +36,13 @@ struct Opt {
 
     #[structopt(
         long,
+        default_value = "0.5",
+        help = "Maximum fraction of minor symbols for a site to be considered"
+    )]
+    max_minor: f32,
+
+    #[structopt(
+        long,
         help = "Filename to write the per-sequence Henikoff weights to, in Tab Separated Value format"
     )]
     henikoff_output: Option<PathBuf>,
@@ -120,7 +127,8 @@ fn main() -> Result<(), std::io::Error> {
     let sw = Instant::now();
     let min_acgt = (opt.min_acgt * siteset.n_seqs() as f32).ceil() as u32;
     let min_minor = opt.min_minor;
-    let filtered_siteset = siteset.filter_by(|s| is_site_of_interest(s, min_acgt, min_minor));
+    let max_minor = opt.max_minor;
+    let filtered_siteset = siteset.filter_by(|s| is_site_of_interest(s, min_acgt, min_minor, max_minor));
     info!(
         "Computed + filtered sites of interest in {:?}",
         sw.elapsed()
