@@ -1,4 +1,4 @@
-m# Oscar Charles 210404
+# Oscar Charles 210404
 # Steven Henikoff and Jorja G. Henikoff (1994) "Position-based Sequence Weights" 
 # using matt hahn molpopgen book
 # This code calculates sequence weights using the Henikoff formula from a multiple sequuence alignment
@@ -8,268 +8,264 @@ m# Oscar Charles 210404
 # sequence weighting - treat 4 as a not ok character
 # LD - why are some values being returned infinte?
 
+import logging
+import argparse
+from pathlib import Path
+
 from Bio import AlignIO
 import numpy as np
-### modifications
-minACGT = 0.80   # Minimum fractions of ACTG at a given site for the site to be included in calculation. increase this to remove more noise say 0.5
-#msa = sys.argv[0]
-alignmentFile = "example.fasta"
-### end
 
 
-class MSA:
-    ### this handles the alignment
-    # read alignment
-    # generate allelle matrix
-    # todo
-    # check the LD, the weighted values are all weird and wonderful
-    def __init__(self, alignmentFile, minACGT):
-        self.alignment = AlignIO.read(alignmentFile, "fasta")
-        self.minACGT = minACGT
-        self.nSeqs = np.uint64(len(self.alignment))
-        self.nSites = self.alignment.get_alignment_length()
-        self.alignment_array = self.alignment2alignment_array(self.alignment)
-        self.var_sites = self.which_pos_var()
-        #self.weighting = self.henikoff_weighting(self)
-        # LD will be called separately
+logging.basicConfig(
+    format='[%(levelname)s] %(asctime)s %(message)s',
+    level=logging.INFO,
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+def read_fasta(filename: Path) -> np.ndarray:
+    raw_alignment = AlignIO.read(filename, "fasta")
+
+    alignment_chars = np.zeros((len(raw_alignment), raw_alignment.get_alignment_length()), dtype='<U1')
+    for (iSeq, seq) in enumerate(raw_alignment):
+        alignment_chars[iSeq, :] = list(str(seq.seq).lower())
+
+    alignment = np.full_like(alignment_chars, fill_value=5, dtype=np.uint8)
+    alignment[alignment_chars == 'a'] = 0
+    alignment[alignment_chars == 'c'] = 1
+    alignment[alignment_chars == 'g'] = 2
+    alignment[alignment_chars == 't'] = 3
+    alignment[alignment_chars == '-'] = 4
     
+    return alignment
+
+def compute_variable_sites(alignment: np.ndarray, min_acgt: float, min_variability: float) -> np.ndarray:
+    """
+    Which sites have both sufficient data and a significant enough quantity of a minor symbol
+
+    Args:
+        alignment: 2D numpy array where:
+            - The first axis represents sequences
+            - The second axis represents sites
+            - Each element is an integer where (A, C, G, T, -, ambiguous) is
+              represented by (0, 1, 2, 3, 4, 5)
+        min_acgt: The minimum fraction of sequences which must have A/C/G/T
+            symbols at a given site
+        min_variability: The minimum fraction of sequences which have the minor
+            symbol at a given site, ignoring sequences that have missing or
+            ambiguous symbols.
+
+    Returns:
+        A 1D boolean array of length n_sites, which is True for each site that
+        meets the criteria
+    """
     
-    def alignment2alignment_array(self, alignment):
-        alignment_array = np.array([list(rec) for rec in alignment], np.dtype("U4")) # alignment as matrix, of dtype unicode
-        alignment_array = alignment_array.astype('U13') #convert from bytecode to character       
-        BaseToInt = {
-           "A":0,
-           "a":0,
-           "C":1,
-           "c":1,
-           "G":2,
-           "g":2,
-           "T":3,
-           "t":3,
-           "-":4,
-           #".":4,- pref behaviour is throw an error
-           "k":5,"m":5,"n":5,"r":5,"s":5,"v":5,"y":5,"b":5,"w":5,"h":5,"d":5} # ambiguity codes - impute N or mean score
-        # translate character matrix to integer using dict
-        alignment_array = np.vectorize(BaseToInt.get)(alignment_array)
-        alignment_array = alignment_array.astype(np.uint8()) #convert to 1 byte
-        return alignment_array
-            
+    # For each site, the fraction of sequences which have a concrete symbol at that position
+    concrete_fraction = (alignment < 4).sum(axis=0) / alignment.shape[0]
     
-    def which_pos_var(self):
-        # in
-            # alignment array
-        # ignores sites where min ACTG fraction not met
-        # out
-            # vector of variable position ignore character 4
-        which_var = np.zeros(shape=(self.nSites),dtype=(np.uint64))
-        for pos in range(0,self.nSites):
-            array = self.alignment_array[:,pos]
-            # if is too little information
-            if ( np.count_nonzero(array >= 4) / self.nSeqs) > minACGT: # if too many gaps / ambigious.
-                # //todo try something reasonable
-                continue # goto next
-            a = np.unique(array)
-            a = a[a < 4] # remove the indels
-            a = len(a)
-            if a > 1:
-                which_var[pos] = 1
-        out = np.where(which_var == 1) # vector of 0 and 1 ->  index of var pos
-        return out[0] # force return 1darray
+    # Whether a given site has enough data to be considered for further processing
+    sufficient_data = concrete_fraction > min_acgt
+
+    # For each site, how many sequences have a given symbol at that site
+    acgt_counts = np.array([(alignment == x).sum(axis=0) for x in (0, 1, 2, 3)])
+
+    major_counts = acgt_counts.max(axis=0)
+    minor_counts = acgt_counts.sum(axis=0) - major_counts
+
+    f = minor_counts > 0
+    minor_fraction = np.zeros(alignment.shape[1])
+    minor_fraction[f] = minor_counts[f] / (major_counts[f] + minor_counts[f])
     
+    # Does the minor symbol occur at a high enough frequency
+    has_min_variability = minor_fraction >= min_variability
     
-    def henikoff_weighting(self):
-        # todo treat val of 4 as not ok.
-        # generate arrays of nSeqs
-        # for each pos
-            # sum the weighting to seqs
-        # then normalise
-        weights = np.zeros(shape=(self.nSeqs),dtype=(np.float32()))    # the output
-        fracOK = np.zeros(shape=(self.nSeqs),dtype=(np.float32()))     
-        nSitesCounted = 0                                           # we might not count all sites in the weighting
-        okBaseVals = [0,1,2,3,4]                                      # which values are ok
+    # Whether each site has multiple non-ambiguous symbols
+    multiple_non_ambiguous = np.sum(acgt_counts > 0, axis=0) > 1
+    
+    return multiple_non_ambiguous & sufficient_data & has_min_variability
+    
+
+def henikoff_weighting(alignment: np.ndarray) -> np.ndarray:
+    """
+    The Henikoff weighting for each sequence in the given alignment array.
+
+    Args:
+        alignment: 2D numpy array where:
+            - The first axis represents sequences
+            - The second axis represents sites
+            - Each element is an integer where (A, C, G, T, -, ambiguous) is
+              represented by (0, 1, 2, 3, 4, 5)
+            - Only sites of interest are included
+    
+    Returns:
+        A 1D numpy array of length n_seqs, containing the Henikoff weight of each sequence.
+    """
+    
+    n_sites = alignment.shape[1]
+    n_seqs = alignment.shape[0]
+    
+    # Mask for non-ambiguous bases (False where the base is ambiguous)
+    ok_base = (alignment != 5)
+    
+    # For each site, the count of sequences that have a given symbol at that site
+    # Eg count_base[1, 1234] contains the count of sequences that have symbol 1 at site 1234
+    count_base = np.zeros((6, n_sites))
+    for base in range(6):
+        count_base[base, :] = (alignment == base).sum(axis=0)
         
-        #---------- loop over each site, and for each seq keep tally of cumulative weighting
-        for iSite in self.var_sites:                                   # for each variable site
-            #print(iSite)
-            array = self.alignment_array[:,iSite]                      # the already converted array i.e. actg--> 01234
-            unique_elements, counts_elements = np.unique(array, return_counts=True)
-            okBase = np.in1d(array, okBaseVals)                     # vector of T/F for okayness ignores anythin other than actg-.
-            nSitesCounted = nSitesCounted + 1
-            countBase = np.zeros(shape=(5),dtype=(np.int64()))
-            countBase[0] = np.count_nonzero(array == 0)
-            countBase[1] = np.count_nonzero(array == 1)
-            countBase[2] = np.count_nonzero(array == 2)
-            countBase[3] = np.count_nonzero(array == 3)
-            countBase[4] = np.count_nonzero(array == 4)
-            tSeqs = countBase[0] + countBase[1] + countBase[2] + countBase[3] + countBase[4]
-            if ( ( tSeqs - countBase[4] ) / self.nSeqs ) < self.minACGT:   #if too many missing vals then go to next
+    # For each site, the count of sequences with a concrete symbol at that site
+    t_seqs = np.sum(count_base[:5, :], axis=0)
+    
+    site_contribution = np.zeros(alignment.shape)
+    site_contribution[ok_base] = 1 / (t_seqs * count_base[alignment, np.arange(n_sites)])[ok_base]
+    
+    # For each ambiguous base, fill in the average contribution across all
+    # sequences with concrete bases for that site
+    site_contribution[~ok_base] = 0
+    site_average_weight = site_contribution.sum(axis=0) / t_seqs
+    site_contribution[~ok_base] = np.broadcast_to(site_average_weight, site_contribution.shape)[~ok_base]
+    
+    # For each sequence, the sum of contributions from each site
+    weights = site_contribution.sum(axis=1)
+
+    # Normalize such that the largest weight is exactly 1
+    return weights / weights.max()
+
+    
+def ld(alignment, weights, site_map):
+    """
+    Generate LD metrics; D, D', and R2
+    
+    Args:
+        alignment: 2D numpy array where:
+            - The first axis represents sequences
+            - The second axis represents sites
+            - Each element is an integer where (A, C, G, T, -, ambiguous) is
+              represented by (0, 1, 2, 3, 4, 5)
+            - Only sites of interest should be included
+        weights: 1D numpy array of length n_seqs, containing the relative weight of each sequence
+        site_map: Some object that can map site indices in the alignment argument to meaningful site indices
+    
+    Returns:
+        Nothing, just prints the results to stdout in a tab-separated format
+    """
+    
+    n_seqs = alignment.shape[0]
+    n_sites = alignment.shape[1]
+    
+    # stdout headers
+    print("posa\tposb\tD\tD'\tR2")
+    for first_site in range(n_sites - 1):
+        logging.info("    Outer loop: %s/%s", first_site, n_sites)
+        for second_site in range(first_site + 1, n_sites):
+            # Form an array which contains all the sequences, but only the two target sites
+            target_sites = alignment[:, (first_site, second_site)]
+
+            # Remove all sequences with a bad symbol at either target site
+            good_sequences = (target_sites < 4).all(axis=1)
+            target_sites = target_sites[good_sequences, :]
+            target_weights = weights[good_sequences]
+            target_seqs = target_sites.shape[0]
+            
+            # For each of the sequence, the "major allele" is the symbol that occurs most frequently
+
+            # Whether the given sequence is equal to the major symbol at the given site
+            target_sites_major = np.zeros_like(target_sites, dtype=np.bool8)
+
+            skip_site = False
+            for site in (0, 1):
+                unique_elements, counts = np.unique(target_sites[:, site], return_counts=True)
+                if len(unique_elements) == 1:
+                    # After removing the bad sequences, one or both of the
+                    # sites may no longer be variable. Stop calculations here
+                    # if that is the case.
+                    skip_site = True
+                major_symbol = unique_elements[counts.argmax()]
+                target_sites_major[target_sites[:, site] == major_symbol, site] = True
+            if skip_site:
                 continue
-            sumSiteWeight = np.uint64(0.0) # for this site whats the total weight applied to all ok seqs?
-            for iSeq in range(0,self.nSeqs):  # //todo update this so that it defulats to 0 and only checks okbases
-                if okBase[iSeq]: # calculate the site contribution
-                    iSeq_base = array[iSeq]
-                    siteDenom = np.uint64(tSeqs * countBase[iSeq_base])
-                    siteContribution = np.float64(1.0/(siteDenom))  # key    contribution to the weight from this site, this is the henikoff
-                    weights[iSeq] = weights[iSeq] + siteContribution        # Key    For this seq, keep a tab of its cumulative weight over all sites
-                    sumSiteWeight = sumSiteWeight + siteContribution
-                    fracOK[iSeq] = fracOK[iSeq] + 1
-                
-            avgWeight =  sumSiteWeight / tSeqs # sum(weights) / n(weights) - mean(weight)
             
-            # give any imbigious charcters the mean weighting score
-            for iSeq in range(0,self.nSeqs):   # if not okbase, give it the average for this pos
-                if not okBase[iSeq]: 
-                    weights[iSeq] += avgWeight
-        # end of loop over sites
-        
-        
-        #---------- normalise
-        norm = weights / weights.max()
-        fracOK = fracOK / nSitesCounted
-        
-        #---------- stdout
-        print("seq\tfracOK\tWeight")
-        for iSeq in range(0,self.nSeqs):
-            print(str(iSeq) + "\t" + str(fracOK[iSeq]) + "\t" + str(norm[iSeq]))
+            total_weight = target_weights.sum()
+            PA, PB = np.ma.masked_array(target_weights.reshape(-1, 1).repeat(2, axis=1), ~target_sites_major).sum(axis=0) / total_weight
+            Pa, Pb = np.ma.masked_array(target_weights.reshape(-1, 1).repeat(2, axis=1), target_sites_major).sum(axis=0) / total_weight
             
-        #end
-        print("alles schon")
-        return norm
-        
-        
+
+            # ----- predicted allele freqs if 0 LD
+            PAB = PA * PB
+            PAb = PA * Pb
+            PaB = Pa * PB
+            Pab = Pa * Pb
+
+            
+            # ----- observed allelle frequencies
+            ld_obs = np.zeros(4)
+            ld_obs[0] = target_weights[~target_sites_major[:, 0] & ~target_sites_major[:, 1]].sum()
+            ld_obs[3] = target_weights[target_sites_major[:, 0] & target_sites_major[:, 1]].sum()
+            ld_obs[1] = target_weights[~target_sites_major[:, 0] & target_sites_major[:, 1]].sum()
+            ld_obs[2] = target_weights[target_sites_major[:, 0] & ~target_sites_major[:, 1]].sum()
+            ld_obs = ld_obs / total_weight
+
+            # ----- Caclulate D [Linkage Disequilibrium]
+            # the vector is now as in the hahn molpopgen book and can be used to generate D values
+            # ld_obs is pAB, p
+            tD = np.zeros(4)
+            tD[0] = PAB - ld_obs[3] # MajMaj
+            tD[1] = Pab - ld_obs[0] # minmin  
+            tD[2] = -1 * (PAb - ld_obs[2]) # Majmin
+            tD[3] = -1 * (PaB - ld_obs[1]) # minMaj
+            D = (tD[0] + tD[1] + tD[2] + tD[3]) / 4     #they should be the same anyhow
+
+            # normalised D = D'
+            if D < 0:
+                denominator = max([-ld_obs[0],-ld_obs[3]])
+                if denominator == 0:
+                    denominator = min([-ld_obs[0],-ld_obs[3]])
+            else:
+                denominator = min([ld_obs[1],ld_obs[2]])
+                if denominator == 0:
+                    denominator = max([ld_obs[1],ld_obs[2]])  
+            DPrime = D / denominator
+                
+            # calculate R2
+            R2 = D**2 / ( PA * Pa * PB * Pb )
+            
+            # cat output
+            print(f"{site_map[first_site]}\t{site_map[second_site]}\t{round(D, 4)}\t{round(DPrime, 4)}\t{round(R2, 4)}")
+
+
+def main(args):
+    logging.info("Reading FASTA data from %s", args.fasta_input)
+    alignment = read_fasta(args.fasta_input)
+    logging.info("Finished reading data. Sequence count: %s, Sequence length %s", *alignment.shape)
     
+    logging.info("Computing sites of iterest (min_acgt=%s, min_variability=%s)", args.min_acgt, args.min_variability)
+    var_sites = compute_variable_sites(alignment, args.min_acgt, args.min_variability)
+    logging.info("Found %s sites of interest", var_sites.sum())
     
-    def LD(self, weights):
-        # generate LD metric D and R2
-        print("posa\tposb\tD\tD'\tR2") # stdout headers
-        iLoops = 0
-        outer_loop = self.var_sites[0:len(self.var_sites)-1]
-        print(self.var_sites)
-        for i in outer_loop:
-            iLoops += 1
-            inner_loop = self.var_sites[iLoops:len(self.var_sites)]
-            for j in inner_loop:
-                #print(str(i) + "   " + str(j))
-                # compare each pairwise position
-                
-                #----- remove any sequences with indel or illegal character
-                # which index values need removing?
-                i_array = self.alignment_array[:,i]
-                remove = np.where(i_array >= 4) # which seqs contain illegal char in i
-                j_array = self.alignment_array[:,j]
-                remove = np.append(remove,np.where(j_array >= 4)) # which sequences in total contain illegals?
-                remove = np.unique(remove)
-                
-                # remove any sequence as identified above, which contained a illegal in i or j
-                i_array = np.delete(i_array, remove)
-                j_array = np.delete(j_array, remove)
-                tSeqs = len(i_array) # for this comparison, how many seqs are there?
-                # now so long as i delete the save indexes from weights im ok
-                tWeights = np.delete(weights, remove)
-                
-                
-                
-               
-                
-                # ----- Find and Assign Major / Minor Allele
-                # first site
-                unique_elements, counts_elements = np.unique(i_array, return_counts=True)
-                if len(unique_elements) == 1: # is the site still variable after removing?
-                    continue
-                major = unique_elements[counts_elements.argmax()] # which value is max
-                i_array = np.where(i_array == major, 1, 0) # if is major value then 1 else 0
-                
-                # rather than count, here we need to sum the weights. i.e. weights[np.which == 1]
-                PA = sum(tWeights[i_array == 1]) / sum(tWeights) # div by su of weights for all seqs
-                Pa = sum(tWeights[i_array == 0]) / sum(tWeights)
-                
-                # second site
-                unique_elements, counts_elements = np.unique(j_array, return_counts=True)
-                if len(unique_elements) == 1: # is the site still variable after removing?
-                    continue
-                major = unique_elements[counts_elements.argmax()] # which is max
-                j_array = np.where(j_array == major, 1, 0) # if is major then
-                
-                PB = sum(tWeights[j_array == 1]) / sum(tWeights)
-                Pb = sum(tWeights[j_array == 0]) / sum(tWeights)
-                
-                
-                
-                
-                
-                # ----- observed allelle frequencies
-                ld_obs = np.zeros(shape=(4),dtype=(np.float32)) # as weighting is fractional
-                for k in range(0,tSeqs): # for each sequence, see which bin it fits in. then rather than inc by 1 . increment by weighting
-                    if i_array[k] == 0 and j_array[k] == 0:     #Oab
-                        ld_obs[0] = ld_obs[0] + tWeights[k]
-                    elif i_array[k] == 1 and j_array[k] == 1:   #OAB
-                        ld_obs[3] = ld_obs[3] + tWeights[k]
-                    elif i_array[k] == 0 and j_array[k] == 1:   #OAb
-                        ld_obs[1] = ld_obs[1] + tWeights[k]
-                    elif i_array[k] == 1 and j_array[k] == 0:   #OaB
-                        ld_obs[2] = ld_obs[2] + tWeights[k]
-                    else:
-                        print(k)
-                ld_obs = ld_obs / sum(tWeights)
-                
-                
-                
-                
-                
-                # ----- predicted allele freqs if 0 LD
-                PAB = PA * PB
-                PAb = PA * Pb
-                PaB = Pa * PB
-                Pab = Pa * Pb
-                
-                
-                
-                
+    # Trim down the alignment array to only include the sites of interest
+    alignment = alignment[:, var_sites]
+    
+    # Maps site indices in the trimmed down array to site indices in the original alignment
+    site_map = np.where(var_sites)[0]
+    
+    logging.info("Computing Henikoff weights for each sequence")
+    weightsHK = henikoff_weighting(alignment)
 
-                # ----- Caclulate D [Linkage Disequilibrium]
-                # the vector is now as in the hahn molpopgen book and can be used to generate D values
-                # ld_obs is pAB, p
-                tD = np.zeros(shape=(4),dtype=(np.float32))
-                #tD[0] = abs(ld_obs[3] - PAB) # MajMaj
-                #tD[1] = abs(ld_obs[0] - Pab) # minmin  
-                #tD[2] = abs(ld_obs[2] - PAb) #Majmin
-                #tD[3] = abs(ld_obs[1] - PaB) #minMaj
-                tD[0] = PAB - ld_obs[3] # MajMaj
-                tD[1] = Pab - ld_obs[0] # minmin  
-                tD[2] = -1 * (PAb - ld_obs[2]) #Majmin
-                tD[3] = -1 * (PaB - ld_obs[1]) #minMaj
-                D = (tD[0] + tD[1] + tD[2] + tD[3]) / 4     #they should be the same anyhow
-                
-                
-                
-                # normalised D = D'
-                if D < 0:
-                    denominator = max([-ld_obs[0],-ld_obs[3]])
-                    if denominator == 0:
-                        denominator = min([-ld_obs[0],-ld_obs[3]])
-                else:
-                    denominator = min([ld_obs[1],ld_obs[2]])
-                    if denominator == 0:
-                        denominator = max([ld_obs[1],ld_obs[2]])  
-                DPrime = D / denominator
-                    
-                
-                
-                
-                # calculate R2
-                R2 = D**2 / ( PA * Pa * PB * Pb )
-                
-                # cat output
-                print(str(i)+"\t"+str(j)+"\t"+str(round(D, 4))+"\t"+str(round(DPrime, 4))+"\t"+str(round(R2, 4)))
-                
+    weights1 =  np.zeros(alignment.shape[0], dtype=np.uint16)
+    weights1[weights1 == 0] = 1
+    weights = weights1
+    
+    logging.info("Computing the LD parameters")
+    ld(alignment, weights1, site_map)
 
 
-        
-        
-a = MSA(alignmentFile, minACGT)
-
-weightsHk = a.henikoff_weighting()
-weights1 =  np.zeros(shape=(a.nSeqs),dtype=(np.uint16()))
-weights1[weights1 == 0] = 1
-weights = weights1
-ld = a.LD(weights1)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="WeightedLD computation tool")
+    parser.add_argument("--fasta-input", type=Path, help="The source file to load", required=True)
+    parser.add_argument("--min-acgt", type=float, default=0.8,
+        help="Minimum fractions of ACTG at a given site for the site to be included in calculation.\
+            increase this to remove more noise say 0.5")
+    parser.add_argument("--min-variability", type=float, default=0.02,
+        help="Minimum fraction of minor symbols for a site to be considered")
+    
+    args = parser.parse_args()
+    main(args)
