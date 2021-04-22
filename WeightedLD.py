@@ -14,7 +14,6 @@ from pathlib import Path
 
 from Bio import AlignIO
 import numpy as np
-import weighted_ld_helper as helper
 
 
 logging.basicConfig(
@@ -25,8 +24,19 @@ logging.basicConfig(
 
 def read_fasta(filename: Path) -> np.ndarray:
     raw_alignment = AlignIO.read(filename, "fasta")
-    return helper.multiseq_to_arr(raw_alignment)
 
+    alignment_chars = np.zeros((len(raw_alignment), raw_alignment.get_alignment_length()), dtype='<U1')
+    for (iSeq, seq) in enumerate(raw_alignment):
+        alignment_chars[iSeq, :] = list(str(seq.seq).lower())
+
+    alignment = np.full_like(alignment_chars, fill_value=5, dtype=np.uint8)
+    alignment[alignment_chars == 'a'] = 0
+    alignment[alignment_chars == 'c'] = 1
+    alignment[alignment_chars == 'g'] = 2
+    alignment[alignment_chars == 't'] = 3
+    alignment[alignment_chars == '-'] = 4
+    
+    return alignment
 
 def compute_variable_sites(alignment: np.ndarray, min_acgt: float, min_variability: float) -> np.ndarray:
     """
