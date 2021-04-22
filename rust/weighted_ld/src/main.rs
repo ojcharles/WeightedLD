@@ -43,6 +43,13 @@ struct Opt {
 
     #[structopt(
         long,
+        default_value = "0.1",
+        help = "Minimum value of R2 to be included in the output"
+    )]
+    r2_threshold: f32,
+
+    #[structopt(
+        long,
         help = "Filename to write the per-sequence Henikoff weights to, in Tab Separated Value format"
     )]
     henikoff_output: Option<PathBuf>,
@@ -68,8 +75,7 @@ fn write_henikoff_weights(path: &PathBuf, weights: &[f32]) -> Result<(), std::io
 
 fn write_pair_stats(
     path: &PathBuf,
-    pairs: &PairStore,
-    source_set: &SiteSet,
+    pairs: &PairStore<LdStats>,
 ) -> Result<(), std::io::Error> {
     let file = File::create(path)?;
     let mut w = BufWriter::new(file);
@@ -88,26 +94,17 @@ fn write_pair_stats(
 
     writeln!(w, "site_a\tsite_b\td\td'\tr2")?;
 
-    for first_idx in 0..(source_set.n_sites() - 1) {
-        let parent_first_idx = source_set.parent_site_index(first_idx);
-        for second_idx in (first_idx + 1)..source_set.n_sites() {
-            let parent_second_idx = source_set.parent_site_index(second_idx);
-            let ld_stat = match pairs.get_pair(first_idx, second_idx) {
-                Some(x) => x,
-                None => continue,
-            };
+    for (first_idx, second_idx, ld_stat) in pairs.iter() {
+        writeln!(
+            w,
+            "{}\t{}\t{:.3}\t{:.3}\t{:.3}",
+            first_idx, second_idx, ld_stat.d, ld_stat.d_prime, ld_stat.r2
+        )?;
 
-            writeln!(
-                w,
-                "{}\t{}\t{:.3}\t{:.3}\t{:.3}",
-                parent_first_idx, parent_second_idx, ld_stat.d, ld_stat.d_prime, ld_stat.r2
-            )?;
-
-            written += 1;
-            if written % 5000 == 0 {
-                if let Some(pb) = &pb {
-                    pb.set_position(written);
-                }
+        written += 1;
+        if written % 5000 == 0 {
+            if let Some(pb) = &pb {
+                pb.set_position(written);
             }
         }
     }
@@ -152,13 +149,12 @@ fn main() -> Result<(), std::io::Error> {
         write_henikoff_weights(&hk_filepath, &weights_hk)?;
     }
 
-    let mut pair_store = PairStore::new(filtered_siteset.n_sites());
-
     info!("Beginning pairwise weighted LD computation");
     let sw = Instant::now();
-    {
+    let total_pairs = (filtered_siteset.n_sites() - 1) * (filtered_siteset.n_sites() - 2) / 2;
+    let mut pair_store = {
         let pb = if log_enabled!(Level::Info) {
-            let bar = ProgressBar::new(pair_store.len() as u64);
+            let bar = ProgressBar::new(total_pairs as u64);
             bar.set_style(ProgressStyle::default_bar()
                 .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {percent}% ({per_sec} {eta_precise})")
                 .progress_chars("#>-"));
@@ -170,29 +166,33 @@ fn main() -> Result<(), std::io::Error> {
         all_weighted_ld_pairs(
             &filtered_siteset,
             &weights_hk,
-            &mut pair_store,
+            opt.r2_threshold,
             |computed| {
                 if let Some(pb) = &pb {
                     pb.set_position(computed as u64);
                 }
             },
-        );
-    }
+        )
+    };
     let pair_calc_duration = sw.elapsed();
     info!(
         "Finished computing pairwise weighted LD stats in {:?}",
         pair_calc_duration
     );
     info!(
-        "    ~{}",
+        "    {} pairs computed at ~{}, {} passed threshold",
+        Formatter::new()
+            .format(total_pairs as f64),
         Formatter::new()
             .with_units("pairs/s")
-            .format(pair_store.len() as f64 / pair_calc_duration.as_secs_f64())
+            .format(total_pairs as f64 / pair_calc_duration.as_secs_f64()),
+        Formatter::new()
+            .format(pair_store.len() as f64),
     );
 
     info!("Writing output to {:?}", opt.pair_output);
     let sw = Instant::now();
-    write_pair_stats(&opt.pair_output, &pair_store, &filtered_siteset)?;
+    write_pair_stats(&opt.pair_output, &pair_store)?;
     info!("Finshed writing output in {:?}", sw.elapsed());
 
     Ok(())
