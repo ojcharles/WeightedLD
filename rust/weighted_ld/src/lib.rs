@@ -88,34 +88,25 @@ impl<T: num::Integer + Copy + Sum> SymbolHistogram<T> {
         hist
     }
 
-    fn from_slice_mask(symbols: &[Symbol], mask: &[bool]) -> Self {
-        debug_assert_eq!(symbols.len(), mask.len());
-
-        let mut hist = Self::zero();
-        for (symbol, mask) in symbols.iter().zip(mask.iter()) {
-            if !mask {
-                continue;
-            }
-            hist[*symbol] = hist[*symbol].add(T::one());
-        }
-        hist
-    }
-
     fn acgt(&self) -> T {
         use Symbol::*;
         self[A] + self[C] + self[G] + self[T]
     }
 
-    fn major_symbol(&self) -> Option<Symbol> {
+    fn major_minor_symbols(&self) -> (Option<Symbol>, Option<Symbol>) {
         let mut major = None;
+        let mut minor = None;
 
         for sym in &[Symbol::A, Symbol::C, Symbol::G, Symbol::T] {
             if self[*sym] > major.map(|m| self[m]).unwrap_or(T::zero()) {
+                minor = major;
                 major = Some(*sym);
+            } else if self[*sym] > minor.map(|m| self[m]).unwrap_or(T::zero()) {
+                minor = Some(*sym);
             }
         }
 
-        major
+        (major, minor)
     }
 }
 
@@ -259,14 +250,19 @@ pub fn is_site_of_interest(site: &[Symbol], min_acgt: u32, min_minor: f32, max_m
         // There aren't enough ACGT symbols at this site
         false
     } else {
-        let major_sym = match hist.major_symbol() {
-            Some(m) => m,
+        let (major_sym, minor_sym) = match hist.major_minor_symbols() {
+            (Some(maj), Some(min)) => (maj, min),
             _ => return false,
         };
         
-        let minor_frac = (acgt_count as f32 - hist[major_sym] as f32) / hist.acgt() as f32;
+        let maj_count = hist[major_sym] as f32;
+        let min_count = hist[minor_sym] as f32;
 
-        if minor_frac < min_minor || minor_frac > max_minor{
+        // let minor_frac = min_count / acgt_count as f32;
+        let minor_frac = min_count / (min_count + maj_count);
+        // let minor_frac = (acgt_count as f32 - min_count) / acgt_count as f32;
+
+        if minor_frac < min_minor || minor_frac > max_minor {
             // The fraction of minor symbols is either too low or too high
             false
         } else {
@@ -329,24 +325,29 @@ pub fn single_weighted_ld_pair(a: &[Symbol], b: &[Symbol], weights: &[f32]) -> O
     debug_assert_eq!(a.len(), b.len());
     debug_assert_eq!(a.len(), weights.len());
 
+    // TODO: It is wasteful to compute these histograms for every pair - should
+    // lift their computations outside the pairwise loop.
+    let a_hist = SymbolHistogram::<u32>::from_slice(a);
+    let b_hist = SymbolHistogram::<u32>::from_slice(b);
+
+    let (a_maj_sym, a_min_sym) = match a_hist.major_minor_symbols() {
+        (Some(maj), Some(min)) => (maj, min),
+        _ => return None,
+    };
+
+    let (b_maj_sym, b_min_sym) = match b_hist.major_minor_symbols() {
+        (Some(maj), Some(min)) => (maj, min),
+        _ => return None,
+    };
+
     let good_mask = a
         .iter()
         .zip(b.iter())
-        .map(|(a, b)| a.is_acgt() & b.is_acgt())
+        .map(|(&a, &b)| {
+            (a == a_maj_sym || a == a_min_sym) &&
+            (b == b_maj_sym || b == b_min_sym)
+        })
         .collect::<Vec<bool>>();
-
-    let a_hist = SymbolHistogram::<u32>::from_slice_mask(a, &good_mask);
-    let b_hist = SymbolHistogram::<u32>::from_slice_mask(b, &good_mask);
-
-    let a_maj_sym = match a_hist.major_symbol() {
-        Some(maj) => maj,
-        _ => return None,
-    };
-
-    let b_maj_sym = match b_hist.major_symbol() {
-        Some(maj) => maj,
-        _ => return None,
-    };
 
     let mut PA = 0f32;
     let mut Pa = 0f32;
@@ -362,6 +363,9 @@ pub fn single_weighted_ld_pair(a: &[Symbol], b: &[Symbol], weights: &[f32]) -> O
         if a[seq] == a_maj_sym {
             PA += weights[seq];
         } else {
+            // good_mask has already filtered down the sequences to ones where
+            // a is either a_maj_sym or a_min_sym -> if a isn't a_maj_sym it
+            // must be a_min_sym.
             Pa += weights[seq];
         }
 
@@ -545,13 +549,15 @@ mod tests {
         let hist = SymbolHistogram {
             data: [0, 1, 10, 2, 0, 0],
         };
-        let maj = hist.major_symbol();
+        let (maj, min) = hist.major_minor_symbols();
         assert_eq!(maj, Some(G));
+        assert_eq!(min, Some(T));
 
         let hist = SymbolHistogram {
-            data: [10, 1, 9, 2, 0, 0],
+            data: [1, 9, 10, 2, 0, 0],
         };
-        let maj = hist.major_symbol();
-        assert_eq!(maj, Some(A));
+        let (maj, min) = hist.major_minor_symbols();
+        assert_eq!(maj, Some(G));
+        assert_eq!(min, Some(C));
     }
 }
