@@ -50,15 +50,21 @@ struct Opt {
 
     #[structopt(
         long,
-        help = "Filename to write the per-sequence Henikoff weights to, in Tab Separated Value format"
+        help = "Filename to write the per-sequence weights to, in Tab Separated Value format"
     )]
-    henikoff_output: Option<PathBuf>,
+    weights_output: Option<PathBuf>,
 
     #[structopt(
         long,
         help = "Filename to write the per-pair weighted LD figures to, in Tab Separated Value format"
     )]
     pair_output: PathBuf,
+
+    #[structopt(
+        long,
+        help = "Use unit weights instead of Henikoff weights"
+    )]
+    unweighted: bool,
 }
 
 fn write_henikoff_weights(path: &PathBuf, weights: &[f32]) -> Result<(), std::io::Error> {
@@ -141,18 +147,26 @@ fn main() -> Result<(), std::io::Error> {
     );
     info!("    Found {} sites of interest", filtered_siteset.n_sites());
 
-    let sw = Instant::now();
-    let weights_hk = henikoff_weights(&filtered_siteset);
-    info!("Computed Henikoff weights in {:?}", sw.elapsed());
-    if let Some(hk_filepath) = opt.henikoff_output {
-        info!("Writing Henikoff weights to {:?}", hk_filepath);
-        write_henikoff_weights(&hk_filepath, &weights_hk)?;
+    let weights = if opt.unweighted {
+        std::iter::repeat(1f32)
+            .take(siteset.n_seqs())
+            .collect::<Vec<_>>()
+    } else {
+        let sw = Instant::now();
+        let weights = henikoff_weights(&filtered_siteset);
+        info!("Computed Henikoff weights in {:?}", sw.elapsed());
+        weights
+    };
+
+    if let Some(weights_filepath) = opt.weights_output {
+        info!("Writing weights to {:?}", weights_filepath);
+        write_henikoff_weights(&weights_filepath, &weights)?;
     }
 
     info!("Beginning pairwise weighted LD computation");
     let sw = Instant::now();
     let total_pairs = (filtered_siteset.n_sites() - 1) * (filtered_siteset.n_sites() - 2) / 2;
-    let mut pair_store = {
+    let pair_store = {
         let pb = if log_enabled!(Level::Info) {
             let bar = ProgressBar::new(total_pairs as u64);
             bar.set_style(ProgressStyle::default_bar()
@@ -165,7 +179,7 @@ fn main() -> Result<(), std::io::Error> {
 
         all_weighted_ld_pairs(
             &filtered_siteset,
-            &weights_hk,
+            &weights,
             opt.r2_threshold,
             |computed| {
                 if let Some(pb) = &pb {
