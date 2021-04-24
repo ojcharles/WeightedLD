@@ -51,7 +51,7 @@ def compute_variable_sites(alignment: np.ndarray, min_acgt: float, min_variabili
               represented by (0, 1, 2, 3, 4, 5)
         min_acgt: The minimum fraction of sequences which must have A/C/G/T
             symbols at a given site
-        min_variability: The minimum fraction of sequences which have the minor 
+        min_variability: The minimum fraction of sequences which have the minor
             symbol at a given site, ignoring sequences that have missing or
             ambiguous symbols.
 
@@ -78,9 +78,11 @@ def compute_variable_sites(alignment: np.ndarray, min_acgt: float, min_variabili
     minor_counts = acgt_counts.sum(axis=0) - major_counts
 
     # sites with any variation
-    f = minor_counts > 0
+    multiple_non_ambiguous = minor_counts > 0
     minor_fraction = np.zeros(alignment.shape[1])
-    minor_fraction[f] = minor_counts[f] / (major_counts[f] + minor_counts[f])
+    minor_fraction[multiple_non_ambiguous] = minor_counts[multiple_non_ambiguous] / \
+        (major_counts[multiple_non_ambiguous] +
+         minor_counts[multiple_non_ambiguous])
 
     # Does the minor symbol occur at a high enough frequency
     has_min_variability = minor_fraction >= min_variability
@@ -88,7 +90,7 @@ def compute_variable_sites(alignment: np.ndarray, min_acgt: float, min_variabili
     # consider a small set of sequences from a recombining population, there could be multiple SNP clues occuring in a small fraction of sequences that together help define a cluster by pairwise distance
     # these are the only filters we want to apply for weighting - as we want to allow for  very minor population SNP's
     # any variability
-    return_hk_varsites = sufficient_data & f
+    return_hk_varsites = sufficient_data & multiple_non_ambiguous
     # has enough variability to return useful LD data
     return_ld_varsites = sufficient_data & has_min_variability
 
@@ -177,15 +179,15 @@ def ld(alignment, weights, site_map):
             target_sites = alignment[:, (first_site, second_site)]
 
             # Remove all sequences with a bad symbol at either target site
-            good_sequences = (target_sites < 4).all(axis=1)
+            good_sequences = (target_sites < 5).all(axis=1)
             target_sites = target_sites[good_sequences, :]
             target_weights = weights[good_sequences]
             target_seqs = target_sites.shape[0]
 
-            # For each of the sequence, the "major allele" is the symbol that occurs most frequently
-
+            # For each of the sequence, the "major allele" is the symbol that occurs most frequently, dominantMinor the 2nd most
             # Whether the given sequence is equal to the major symbol at the given site
             target_sites_major = np.zeros_like(target_sites, dtype=np.bool8)
+            target_sites_domMinor = np.zeros_like(target_sites, dtype=np.bool8)
 
             skip_site = False
             for site in (0, 1):
@@ -196,11 +198,28 @@ def ld(alignment, weights, site_map):
                     # sites may no longer be variable. Stop calculations here
                     # if that is the case.
                     skip_site = True
+                # identifies positions with major_allele
                 major_symbol = unique_elements[counts.argmax()]
                 target_sites_major[target_sites[:, site]
                                    == major_symbol, site] = True
+                # identifies positions with domMino_allele, if two are equal takes first
+                domMinor_symbol = unique_elements[np.argpartition(-counts, kth=2)[
+                    :2]][1]
+                target_sites_domMinor[target_sites[:, site]
+                                      == domMinor_symbol, site] = True
             if skip_site:
                 continue
+
+            # second round of filtering - remove anything thats not Major or domMinor
+            # //todo union the two 2d boolean arrays and get or, should leave a 1d T/F with else as anything else
+            print(target_sites_major)
+
+            # print(target_sites_domMinor)
+            #print(np.logical_and(target_sites_major, target_sites_domMinor))
+            # good_sequences =
+            #target_sites = target_sites[good_sequences, :]
+            #target_weights = weights[good_sequences]
+            #target_seqs = target_sites.shape[0]
 
             total_weight = target_weights.sum()
             PA, PB = np.ma.masked_array(target_weights.reshape(-1, 1).repeat(
@@ -285,7 +304,7 @@ def main(args):
     weights = weights1
 
     logging.info("Computing the LD parameters")
-    ld(alignment, weights1, site_map)
+    ld(alignment, weights, site_map)
 
 
 if __name__ == "__main__":

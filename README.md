@@ -41,8 +41,9 @@ Calculate Henikoff sequence weights
 
 
 calculate weighted LD
-    Identify Major base //should be limited to 0-3, only in an extreme case of 5 equal bases with  ambigious only in acgt will this error
-    Identify dominant Minor base 0-4
+    by sequence number, not weight contribution
+        Identify Major base //should be limited to 0-3, only in an extreme case of 5 equal bases with  ambigious only in acgt will this error
+        Identify dominant Minor base 0-4
     Identify ambigous bases
     remove sequences from calculation that are ambiguous, or (not in Major & dominant Minor).  union of pairwise sites
     calculate predicted PA, Pa, QB, Qb from real allele fractions
