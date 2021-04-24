@@ -353,22 +353,22 @@ pub fn single_weighted_ld_pair(
         _ => return None,
     };
 
-    let good_mask = a
-        .iter()
-        .zip(b.iter())
-        .map(|(&a, &b)| (a == a_maj_sym || a == a_min_sym) && (b == b_maj_sym || b == b_min_sym))
-        .collect::<Vec<bool>>();
-
     let mut PA = 0f32;
     let mut Pa = 0f32;
     let mut PB = 0f32;
     let mut Pb = 0f32;
     let mut ld_obs = [0f32; 4];
+    let mut total_weight = 0f32;
 
     for seq in 0..a.len() {
-        if !good_mask[seq] {
+        if !(a[seq] == a_maj_sym || a[seq] == a_min_sym) {
             continue;
         }
+        if !(b[seq] == b_maj_sym || b[seq] == b_min_sym) {
+            continue;
+        }
+        
+        total_weight += weights[seq];
 
         if a[seq] == a_maj_sym {
             PA += weights[seq];
@@ -392,13 +392,6 @@ pub fn single_weighted_ld_pair(
             (true, false) => ld_obs[2] += weights[seq],
         }
     }
-
-    let total_weight: f32 = weights
-        .iter()
-        .zip(good_mask.iter())
-        .filter(|(_w, m)| **m)
-        .map(|(w, _m)| w)
-        .sum();
 
     PA /= total_weight;
     Pa /= total_weight;
