@@ -422,93 +422,103 @@ pub fn single_weighted_ld_pair(a: &[Symbol], b: &[Symbol], weights: &[f32]) -> O
     Some(LdStats { r2, d, d_prime })
 }
 
-pub struct PairStore {
-    n_sites: usize,
-    buffer: Vec<Option<LdStats>>,
+struct PairData<T> {
+    first_idx: usize,
+    second_idx: usize,
+    data: T
 }
 
-impl PairStore {
-    pub fn new(n_sites: usize) -> Self {
-        if log_enabled!(Level::Info) {
-            let expected_mem_usage = n_sites * n_sites * std::mem::size_of::<Option<LdStats>>();
-            let expected_mem_usage = Formatter::new()
-                .with_scales(Scales::Binary())
-                .with_units("B")
-                .format(expected_mem_usage as f64);
-            info!(
-                "Creating a new in-memory store for pairwise LD data, expected memory usage: {}",
-                expected_mem_usage
-            )
-        }
+pub struct PairStore<T> {
+    chunks: Vec<Vec<PairData<T>>>,
+}
 
-        Self {
-            n_sites,
-            buffer: vec![None; n_sites * n_sites],
+impl<T> PairStore<T> {
+    pub fn iter(&self) -> PairStoreIter<T> {
+        PairStoreIter {
+            store: self,
+            chunk_idx: 0,
+            pair_idx: 0,
         }
     }
     
     pub fn len(&self) -> usize {
-        (self.n_sites - 1) * (self.n_sites - 2) / 2
-    }
-
-    fn linear_idx(&self, first_idx: usize, second_idx: usize) -> usize {
-        debug_assert_ne!(first_idx, second_idx);
-        let (first_idx, second_idx) = if first_idx < second_idx {
-            (first_idx, second_idx)
-        } else {
-            (second_idx, first_idx)
-        };
-
-        // TODO: Inefficient - uses ~twice as much memory as needed
-        first_idx + second_idx * self.n_sites
-    }
-
-    pub fn get_pair(&self, first_idx: usize, second_idx: usize) -> Option<LdStats> {
-        self.buffer[self.linear_idx(first_idx, second_idx)]
-    }
-
-    pub fn write_pair(&mut self, first_idx: usize, second_idx: usize, ld_stat: Option<LdStats>) {
-        let linear_idx = self.linear_idx(first_idx, second_idx);
-        self.buffer[linear_idx] = ld_stat;
-    }
-
-    /// As write_pair, but with an immutable receiver.
-    ///
-    /// It is up to the caller to ensure that the given pair of indices is not being read from or
-    /// written to concurrently by any other thread of execution.
-    unsafe fn write_pair_unsafe(&self, first_idx: usize, second_idx: usize, ld_stat: Option<LdStats>) {
-        let linear_idx = self.linear_idx(first_idx, second_idx);
-        let ptr = &self.buffer[linear_idx] as *const _ as *mut Option<LdStats>;
-        ptr.write(ld_stat);
+        self.chunks
+            .iter()
+            .map(|c| c.len())
+            .sum()
     }
 }
+
+pub struct PairStoreIter<'a, T> {
+    store: &'a PairStore<T>,
+
+    /// Index of the next chunk
+    chunk_idx: usize,
+    
+    /// Index of the next pair within the next chunk
+    pair_idx: usize,
+}
+
+impl<'a, T> Iterator for PairStoreIter<'a, T> {
+    type Item = (usize, usize, &'a T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let ret = if self.chunk_idx < self.store.chunks.len() {
+            let elem = &self.store.chunks[self.chunk_idx][self.pair_idx];
+            (elem.first_idx, elem.second_idx, &elem.data)
+        } else {
+            return None;
+        };
+        
+        self.pair_idx += 1;
+        if self.pair_idx >= self.store.chunks[self.chunk_idx].len() {
+            self.pair_idx = 0;
+            self.chunk_idx += 1;
+        }
+
+        Some(ret)
+    }
+}
+
 
 pub fn all_weighted_ld_pairs(
     site_set: &SiteSet,
     weights: &[f32],
-    store: &mut PairStore,
+    r2_threshold: f32,
     mut progress_report: impl FnMut(usize) + Send,
-) {
+) -> PairStore<LdStats> {
     progress_report(0);
 
     let computed_pair_count = AtomicUsize::new(0);
     let progress_report = Mutex::new(progress_report);
 
-    for first_idx in 0..(site_set.n_sites() - 1) {
-        ((first_idx + 1)..site_set.n_sites()).into_par_iter()
-            .for_each(|second_idx| {
-                let a = &site_set[first_idx];
+    let data_chunks = (0..(site_set.n_sites() - 1)).into_par_iter()
+        .map(|first_idx| {
+            let a = &site_set[first_idx];
+            let mut results_chunk = Vec::new();
+            for second_idx in (first_idx + 1)..site_set.n_sites() {
                 let b = &site_set[second_idx];
-                let ld_stat = single_weighted_ld_pair(a, b, weights);
-
-                unsafe { store.write_pair_unsafe(first_idx, second_idx, ld_stat); }
-
-                let computed = computed_pair_count.fetch_add(1, Ordering::Relaxed);
-                // Avoid spamming the progress bar every single time
-                if computed % 5_000 == 0 {
-                    (progress_report.lock().expect("Failed to get lock on progress indicator callback"))(computed);
+                if let Some(ld_stat) = single_weighted_ld_pair(a, b, weights) {
+                    if ld_stat.r2 > r2_threshold {
+                        results_chunk.push(PairData {
+                            first_idx: site_set.parent_site_index(first_idx),
+                            second_idx: site_set.parent_site_index(second_idx),
+                            data: ld_stat,
+                        });
+                    }
                 }
-            });
+            }
+            
+            let computed = computed_pair_count.fetch_add(site_set.n_sites() - first_idx - 1, Ordering::Relaxed);
+            (progress_report.lock().expect("Failed to get lock on progress indicator callback"))(computed);
+            
+            results_chunk
+        })
+        .filter(|chunk| chunk.len() > 0)
+        .collect::<Vec<Vec<PairData<LdStats>>>>();
+    
+    PairStore {
+        chunks: data_chunks
     }
 }
 
