@@ -5,9 +5,9 @@ use std::{
     ops::{Index, IndexMut},
     path::{Path, PathBuf},
     sync::{
-        Mutex,
         atomic::{AtomicUsize, Ordering},
-    }
+        Mutex,
+    },
 };
 
 use ndarray::prelude::*;
@@ -53,6 +53,7 @@ impl From<char> for Symbol {
     }
 }
 
+#[derive(Clone)]
 pub struct SymbolHistogram<T: num::Integer> {
     data: [T; 6],
 }
@@ -78,7 +79,7 @@ impl<T: num::Integer + Copy + Sum> SymbolHistogram<T> {
         }
     }
 
-    fn from_slice(symbols: &[Symbol]) -> Self {
+    pub fn from_slice(symbols: &[Symbol]) -> Self {
         let mut hist = Self::zero();
         for symbol in symbols {
             hist[*symbol] = hist[*symbol].add(T::one());
@@ -86,12 +87,12 @@ impl<T: num::Integer + Copy + Sum> SymbolHistogram<T> {
         hist
     }
 
-    fn acgt(&self) -> T {
+    pub fn acgt(&self) -> T {
         use Symbol::*;
         self[A] + self[C] + self[G] + self[T]
     }
 
-    fn major_minor_symbols(&self) -> (Option<Symbol>, Option<Symbol>) {
+    pub fn major_minor_symbols(&self) -> (Option<Symbol>, Option<Symbol>) {
         let mut major = None;
         let mut minor = None;
 
@@ -134,15 +135,9 @@ pub struct SiteSet {
     /// Used when this SiteSet is only a subset of the total number of sites.
     /// The site with index N in this set has an index `site_map[N]` in the parent set
     site_map: Option<Vec<usize>>,
-}
 
-impl Index<usize> for SiteSet {
-    type Output = [Symbol];
-
-    fn index(&self, index: usize) -> &Self::Output {
-        let start = index * self.n_seqs;
-        &self.buffer[start..(start + self.n_seqs)]
-    }
+    /// Vector of length n_sites, containing the symbol histogram for each site
+    histograms: Vec<SymbolHistogram<u32>>,
 }
 
 impl SiteSet {
@@ -156,17 +151,24 @@ impl SiteSet {
 
         let buffer_len = n_seqs * n_sites;
         let mut buffer = vec![Symbol::Missing; buffer_len];
+        let mut histograms = Vec::new();
 
         for site in 0..n_sites {
+            let buff_start_idx = site * n_seqs;
             for seq in 0..n_seqs {
-                buffer[site * n_seqs + seq] = ms.sequences[seq].symbols[site];
+                buffer[buff_start_idx + seq] = ms.sequences[seq].symbols[site];
             }
+
+            let hist =
+                SymbolHistogram::from_slice(&buffer[buff_start_idx..(buff_start_idx + n_seqs)]);
+            histograms.push(hist);
         }
 
         Self {
             n_sites,
             n_seqs,
             buffer,
+            histograms,
             site_map: None,
         }
     }
@@ -174,12 +176,14 @@ impl SiteSet {
     pub fn filter_by(&self, filter_func: impl Fn(&[Symbol]) -> bool) -> Self {
         let mut new_buffer = Vec::with_capacity(self.buffer.len());
         let mut site_map = Vec::new();
+        let mut new_histograms = Vec::new();
 
         for site in 0..self.n_sites {
-            let site_slice = &self[site];
+            let site_slice = &self.site_symbols(site);
             if filter_func(site_slice) {
                 site_map.push(site);
                 new_buffer.extend_from_slice(site_slice);
+                new_histograms.push(self.site_histogram(site).clone());
             }
         }
 
@@ -188,6 +192,7 @@ impl SiteSet {
             n_seqs: self.n_seqs,
             buffer: new_buffer,
             site_map: Some(site_map),
+            histograms: new_histograms,
         }
     }
 
@@ -203,6 +208,15 @@ impl SiteSet {
 
     pub fn parent_site_index(&self, idx: usize) -> usize {
         self.site_map.as_ref().map(|m| m[idx]).unwrap_or(idx)
+    }
+
+    pub fn site_symbols(&self, index: usize) -> &[Symbol] {
+        let start = index * self.n_seqs;
+        &self.buffer[start..(start + self.n_seqs)]
+    }
+
+    pub fn site_histogram(&self, index: usize) -> &SymbolHistogram<u32> {
+        &self.histograms[index]
     }
 }
 
@@ -252,7 +266,7 @@ pub fn is_site_of_interest(site: &[Symbol], min_acgt: u32, min_minor: f32, max_m
             (Some(maj), Some(min)) => (maj, min),
             _ => return false,
         };
-        
+
         let maj_count = hist[major_sym] as f32;
         let min_count = hist[minor_sym] as f32;
 
@@ -273,7 +287,7 @@ pub fn henikoff_weights(data: &SiteSet) -> Vec<f32> {
     let mut contributions = Array2::<f32>::zeros((data.n_sites(), data.n_seqs()));
 
     for site in 0..data.n_sites() {
-        let site_slice = &data[site];
+        let site_slice = data.site_symbols(site);
 
         let mut contrib_row = contributions.row_mut(site);
         let contrib_slice = contrib_row
@@ -319,14 +333,15 @@ pub struct LdStats {
 }
 
 #[allow(non_snake_case)]
-pub fn single_weighted_ld_pair(a: &[Symbol], b: &[Symbol], weights: &[f32]) -> Option<LdStats> {
+pub fn single_weighted_ld_pair(
+    a: &[Symbol],
+    a_hist: &SymbolHistogram<u32>,
+    b: &[Symbol],
+    b_hist: &SymbolHistogram<u32>,
+    weights: &[f32],
+) -> Option<LdStats> {
     debug_assert_eq!(a.len(), b.len());
     debug_assert_eq!(a.len(), weights.len());
-
-    // TODO: It is wasteful to compute these histograms for every pair - should
-    // lift their computations outside the pairwise loop.
-    let a_hist = SymbolHistogram::<u32>::from_slice(a);
-    let b_hist = SymbolHistogram::<u32>::from_slice(b);
 
     let (a_maj_sym, a_min_sym) = match a_hist.major_minor_symbols() {
         (Some(maj), Some(min)) => (maj, min),
@@ -341,10 +356,7 @@ pub fn single_weighted_ld_pair(a: &[Symbol], b: &[Symbol], weights: &[f32]) -> O
     let good_mask = a
         .iter()
         .zip(b.iter())
-        .map(|(&a, &b)| {
-            (a == a_maj_sym || a == a_min_sym) &&
-            (b == b_maj_sym || b == b_min_sym)
-        })
+        .map(|(&a, &b)| (a == a_maj_sym || a == a_min_sym) && (b == b_maj_sym || b == b_min_sym))
         .collect::<Vec<bool>>();
 
     let mut PA = 0f32;
@@ -427,7 +439,7 @@ pub fn single_weighted_ld_pair(a: &[Symbol], b: &[Symbol], weights: &[f32]) -> O
 struct PairData<T> {
     first_idx: usize,
     second_idx: usize,
-    data: T
+    data: T,
 }
 
 pub struct PairStore<T> {
@@ -442,12 +454,9 @@ impl<T> PairStore<T> {
             pair_idx: 0,
         }
     }
-    
+
     pub fn len(&self) -> usize {
-        self.chunks
-            .iter()
-            .map(|c| c.len())
-            .sum()
+        self.chunks.iter().map(|c| c.len()).sum()
     }
 }
 
@@ -456,7 +465,7 @@ pub struct PairStoreIter<'a, T> {
 
     /// Index of the next chunk
     chunk_idx: usize,
-    
+
     /// Index of the next pair within the next chunk
     pair_idx: usize,
 }
@@ -471,7 +480,7 @@ impl<'a, T> Iterator for PairStoreIter<'a, T> {
         } else {
             return None;
         };
-        
+
         self.pair_idx += 1;
         if self.pair_idx >= self.store.chunks[self.chunk_idx].len() {
             self.pair_idx = 0;
@@ -481,7 +490,6 @@ impl<'a, T> Iterator for PairStoreIter<'a, T> {
         Some(ret)
     }
 }
-
 
 pub fn all_weighted_ld_pairs(
     site_set: &SiteSet,
@@ -494,13 +502,22 @@ pub fn all_weighted_ld_pairs(
     let computed_pair_count = AtomicUsize::new(0);
     let progress_report = Mutex::new(progress_report);
 
-    let data_chunks = (0..(site_set.n_sites() - 1)).into_par_iter()
+    let data_chunks = (0..(site_set.n_sites() - 1))
+        .into_par_iter()
         .map(|first_idx| {
-            let a = &site_set[first_idx];
+            let a = site_set.site_symbols(first_idx);
+            let a_hist = site_set.site_histogram(first_idx);
             let mut results_chunk = Vec::new();
             for second_idx in (first_idx + 1)..site_set.n_sites() {
-                let b = &site_set[second_idx];
-                if let Some(ld_stat) = single_weighted_ld_pair(a, b, weights) {
+                let b = site_set.site_symbols(second_idx);
+                let b_hist = site_set.site_histogram(second_idx);
+                if let Some(ld_stat) = single_weighted_ld_pair(
+                    a,
+                    a_hist,
+                    b,
+                    b_hist,
+                    weights,
+                ) {
                     if ld_stat.r2 > r2_threshold {
                         results_chunk.push(PairData {
                             first_idx: site_set.parent_site_index(first_idx),
@@ -510,17 +527,20 @@ pub fn all_weighted_ld_pairs(
                     }
                 }
             }
-            
-            let computed = computed_pair_count.fetch_add(site_set.n_sites() - first_idx - 1, Ordering::Relaxed);
-            (progress_report.lock().expect("Failed to get lock on progress indicator callback"))(computed);
-            
+
+            let computed = computed_pair_count
+                .fetch_add(site_set.n_sites() - first_idx - 1, Ordering::Relaxed);
+            (progress_report
+                .lock()
+                .expect("Failed to get lock on progress indicator callback"))(computed);
+
             results_chunk
         })
         .filter(|chunk| chunk.len() > 0)
         .collect::<Vec<Vec<PairData<LdStats>>>>();
-    
+
     PairStore {
-        chunks: data_chunks
+        chunks: data_chunks,
     }
 }
 

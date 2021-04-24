@@ -1,5 +1,5 @@
 
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use rand::prelude::*;
 use num_traits::FromPrimitive;
 
@@ -34,6 +34,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     for len in [10, 50, 100, 250, 500, 1000].iter() {
         let seq_a = make_sequence(*len, 0.1, 0.6);
         let seq_b = make_sequence(*len, 0.1, 0.6);
+        let a_hist = SymbolHistogram::<u32>::from_slice(&seq_a);
+        let b_hist = SymbolHistogram::<u32>::from_slice(&seq_b);
 
         let mut weights = vec![0f32; *len];
         // Defaults to uniforms in the range 0..1
@@ -44,7 +46,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             BenchmarkId::from_parameter(len),
             &(seq_a, seq_b, weights),
             |b, (seq_a, seq_b, weights)| {
-                b.iter(|| single_weighted_ld_pair(seq_a, seq_b, weights));
+                b.iter(|| single_weighted_ld_pair(seq_a, &a_hist, seq_b, &b_hist, weights));
             });
     }
     
