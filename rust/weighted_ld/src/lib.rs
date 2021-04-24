@@ -370,15 +370,15 @@ pub fn single_weighted_ld_pair(
 
         let b = bytemuck::cast_slice::<Symbol, u8>(&b[seq..(seq + 8)]);
         let b = u8x8::from_slice_unaligned(b);
-        
+
         let a_maj = a.eq(u8x8::splat(a_maj_sym as u8));
         let a_min = a.eq(u8x8::splat(a_min_sym as u8));
         let b_maj = b.eq(u8x8::splat(b_maj_sym as u8));
         let b_min = b.eq(u8x8::splat(b_min_sym as u8));
-        
+
         let mask = (a_maj | a_min) & (b_maj | b_min);
         let weight = f32x8::from_slice_unaligned(&weights[seq..(seq + 8)]);
-        
+
         let zero = f32x8::splat(0.0);
         let weight = mask.select(weight, zero);
 
@@ -391,9 +391,7 @@ pub fn single_weighted_ld_pair(
     let mut total_weight = total_weight.sum();
     let mut PA = PA.sum();
     let mut PB = PB.sum();
-    let mut ld_obs = [
-        0.0, 0.0, 0.0, ld_3.sum(),
-    ];
+    let mut ld_obs = [0.0, 0.0, 0.0, ld_3.sum()];
 
     for seq in simd_end..a.len() {
         if !(a[seq] == a_maj_sym || a[seq] == a_min_sym) {
@@ -402,24 +400,23 @@ pub fn single_weighted_ld_pair(
         if !(b[seq] == b_maj_sym || b[seq] == b_min_sym) {
             continue;
         }
-        
+
         total_weight += weights[seq];
         match (a[seq] == a_maj_sym, b[seq] == b_maj_sym) {
             (true, true) => {
                 PA += weights[seq];
                 ld_obs[3] += weights[seq];
-            },
+            }
             (true, false) => PA += weights[seq],
             (false, true) => PB += weights[seq],
             (false, false) => (),
         }
-
     }
 
     PA /= total_weight;
     PB /= total_weight;
     ld_obs[3] /= total_weight;
-    
+
     let Pa = 1.0 - PA;
     let Pb = 1.0 - PB;
     ld_obs[2] = PA - ld_obs[3];
@@ -430,7 +427,6 @@ pub fn single_weighted_ld_pair(
     let PAb = PA * Pb;
     let PaB = Pa * PB;
     let Pab = Pa * Pb;
-
 
     let d = ((PAB - ld_obs[3]) + (Pab - ld_obs[0]) + (ld_obs[2] - PAb) + (ld_obs[1] - PaB)) / 4f32;
 
@@ -528,13 +524,7 @@ pub fn all_weighted_ld_pairs(
             for second_idx in (first_idx + 1)..site_set.n_sites() {
                 let b = site_set.site_symbols(second_idx);
                 let b_hist = site_set.site_histogram(second_idx);
-                if let Some(ld_stat) = single_weighted_ld_pair(
-                    a,
-                    a_hist,
-                    b,
-                    b_hist,
-                    weights,
-                ) {
+                if let Some(ld_stat) = single_weighted_ld_pair(a, a_hist, b, b_hist, weights) {
                     if ld_stat.r2 > r2_threshold {
                         results_chunk.push(PairData {
                             first_idx: site_set.parent_site_index(first_idx),
