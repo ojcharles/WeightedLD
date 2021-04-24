@@ -354,9 +354,7 @@ pub fn single_weighted_ld_pair(
     };
 
     let mut PA = 0f32;
-    let mut Pa = 0f32;
     let mut PB = 0f32;
-    let mut Pb = 0f32;
     let mut ld_obs = [0f32; 4];
     let mut total_weight = 0f32;
 
@@ -369,44 +367,33 @@ pub fn single_weighted_ld_pair(
         }
         
         total_weight += weights[seq];
-
-        if a[seq] == a_maj_sym {
-            PA += weights[seq];
-        } else {
-            // good_mask has already filtered down the sequences to ones where
-            // a is either a_maj_sym or a_min_sym -> if a isn't a_maj_sym it
-            // must be a_min_sym.
-            Pa += weights[seq];
-        }
-
-        if b[seq] == b_maj_sym {
-            PB += weights[seq];
-        } else {
-            Pb += weights[seq];
-        }
-
         match (a[seq] == a_maj_sym, b[seq] == b_maj_sym) {
-            (false, false) => ld_obs[0] += weights[seq],
-            (true, true) => ld_obs[3] += weights[seq],
-            (false, true) => ld_obs[1] += weights[seq],
-            (true, false) => ld_obs[2] += weights[seq],
+            (true, true) => {
+                PA += weights[seq];
+                ld_obs[3] += weights[seq];
+            },
+            (true, false) => PA += weights[seq],
+            (false, true) => PB += weights[seq],
+            (false, false) => (),
         }
+
     }
 
     PA /= total_weight;
-    Pa /= total_weight;
     PB /= total_weight;
-    Pb /= total_weight;
+    ld_obs[3] /= total_weight;
+    
+    let Pa = 1.0 - PA;
+    let Pb = 1.0 - PB;
+    ld_obs[2] = PA - ld_obs[3];
+    ld_obs[1] = PB - ld_obs[3];
+    ld_obs[0] = Pa - ld_obs[1];
 
     let PAB = PA * PB;
     let PAb = PA * Pb;
     let PaB = Pa * PB;
     let Pab = Pa * Pb;
 
-    ld_obs[0] /= total_weight;
-    ld_obs[1] /= total_weight;
-    ld_obs[2] /= total_weight;
-    ld_obs[3] /= total_weight;
 
     let d = ((PAB - ld_obs[3]) + (Pab - ld_obs[0]) + (ld_obs[2] - PAb) + (ld_obs[1] - PaB)) / 4f32;
 
