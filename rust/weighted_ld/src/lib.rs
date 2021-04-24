@@ -10,8 +10,6 @@ use std::{
     }
 };
 
-use human_format::{Formatter, Scales};
-use log::{info, log_enabled, Level};
 use ndarray::prelude::*;
 use num_derive::FromPrimitive;
 use rayon::prelude::*;
