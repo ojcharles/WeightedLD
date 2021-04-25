@@ -21,6 +21,7 @@ indicatif = "0.15"
 [dev-dependencies]
 criterion = "0.3"
 rand = "0.8"
+approx = "0.4"
 
 [[bench]]
 name = "bench_weighted_pair_ld"

@@ -115,6 +115,7 @@ pub struct Sequence {
 
 pub enum MultiSequenceSource {
     FastaFile(PathBuf),
+    None,
 }
 
 pub struct MultiSequence {
@@ -169,6 +170,22 @@ impl SiteSet {
             buffer,
             site_map: None,
         }
+    }
+    
+    #[cfg(test)]
+    pub fn from_strs(raw: &[&str]) -> Self {
+        let sequences = raw
+            .iter()
+            .map(|seq_str| seq_str
+                .chars()
+                .map(Symbol::from)
+                // .map(Option::unwrap)
+                .collect::<Vec<_>>()
+            )
+            .map(|symbols| Sequence { name: None, symbols })
+            .collect::<Vec<Sequence>>();
+            
+        Self::from_multiseq(&MultiSequence { source: MultiSequenceSource::None, sequences })
     }
 
     pub fn filter_by(&self, filter_func: impl Fn(&[Symbol]) -> bool) -> Self {
@@ -527,6 +544,7 @@ pub fn all_weighted_ld_pairs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use approx::*;
 
     #[test]
     fn test_histogram_from_slice() {
@@ -557,5 +575,16 @@ mod tests {
         let (maj, min) = hist.major_minor_symbols();
         assert_eq!(maj, Some(G));
         assert_eq!(min, Some(C));
+    }
+    
+    #[test]
+    fn test_henikoff_weights() {
+        let siteset = SiteSet::from_strs(&[
+            "ACGT",
+            "AAGT",
+            "AAAT",
+            "AAAA",
+        ]);
+        assert_ulps_eq!(henikoff_weights(&siteset)[..], [1.0, 0.68, 0.68, 1.0]);
     }
 }
