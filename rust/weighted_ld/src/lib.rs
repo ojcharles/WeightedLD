@@ -10,8 +10,6 @@ use std::{
     }
 };
 
-use human_format::{Formatter, Scales};
-use log::{info, log_enabled, Level};
 use ndarray::prelude::*;
 use num_derive::FromPrimitive;
 use rayon::prelude::*;
@@ -88,34 +86,25 @@ impl<T: num::Integer + Copy + Sum> SymbolHistogram<T> {
         hist
     }
 
-    fn from_slice_mask(symbols: &[Symbol], mask: &[bool]) -> Self {
-        debug_assert_eq!(symbols.len(), mask.len());
-
-        let mut hist = Self::zero();
-        for (symbol, mask) in symbols.iter().zip(mask.iter()) {
-            if !mask {
-                continue;
-            }
-            hist[*symbol] = hist[*symbol].add(T::one());
-        }
-        hist
-    }
-
     fn acgt(&self) -> T {
         use Symbol::*;
         self[A] + self[C] + self[G] + self[T]
     }
 
-    fn major_symbol(&self) -> Option<Symbol> {
+    fn major_minor_symbols(&self) -> (Option<Symbol>, Option<Symbol>) {
         let mut major = None;
+        let mut minor = None;
 
         for sym in &[Symbol::A, Symbol::C, Symbol::G, Symbol::T] {
             if self[*sym] > major.map(|m| self[m]).unwrap_or(T::zero()) {
+                minor = major;
                 major = Some(*sym);
+            } else if self[*sym] > minor.map(|m| self[m]).unwrap_or(T::zero()) {
+                minor = Some(*sym);
             }
         }
 
-        major
+        (major, minor)
     }
 }
 
@@ -259,14 +248,19 @@ pub fn is_site_of_interest(site: &[Symbol], min_acgt: u32, min_minor: f32, max_m
         // There aren't enough ACGT symbols at this site
         false
     } else {
-        let major_sym = match hist.major_symbol() {
-            Some(m) => m,
+        let (major_sym, minor_sym) = match hist.major_minor_symbols() {
+            (Some(maj), Some(min)) => (maj, min),
             _ => return false,
         };
         
-        let minor_frac = (acgt_count as f32 - hist[major_sym] as f32) / hist.acgt() as f32;
+        let maj_count = hist[major_sym] as f32;
+        let min_count = hist[minor_sym] as f32;
 
-        if minor_frac < min_minor || minor_frac > max_minor{
+        // let minor_frac = min_count / acgt_count as f32;
+        let minor_frac = min_count / (min_count + maj_count);
+        // let minor_frac = (acgt_count as f32 - min_count) / acgt_count as f32;
+
+        if minor_frac < min_minor || minor_frac > max_minor {
             // The fraction of minor symbols is either too low or too high
             false
         } else {
@@ -329,24 +323,29 @@ pub fn single_weighted_ld_pair(a: &[Symbol], b: &[Symbol], weights: &[f32]) -> O
     debug_assert_eq!(a.len(), b.len());
     debug_assert_eq!(a.len(), weights.len());
 
+    // TODO: It is wasteful to compute these histograms for every pair - should
+    // lift their computations outside the pairwise loop.
+    let a_hist = SymbolHistogram::<u32>::from_slice(a);
+    let b_hist = SymbolHistogram::<u32>::from_slice(b);
+
+    let (a_maj_sym, a_min_sym) = match a_hist.major_minor_symbols() {
+        (Some(maj), Some(min)) => (maj, min),
+        _ => return None,
+    };
+
+    let (b_maj_sym, b_min_sym) = match b_hist.major_minor_symbols() {
+        (Some(maj), Some(min)) => (maj, min),
+        _ => return None,
+    };
+
     let good_mask = a
         .iter()
         .zip(b.iter())
-        .map(|(a, b)| a.is_acgt() & b.is_acgt())
+        .map(|(&a, &b)| {
+            (a == a_maj_sym || a == a_min_sym) &&
+            (b == b_maj_sym || b == b_min_sym)
+        })
         .collect::<Vec<bool>>();
-
-    let a_hist = SymbolHistogram::<u32>::from_slice_mask(a, &good_mask);
-    let b_hist = SymbolHistogram::<u32>::from_slice_mask(b, &good_mask);
-
-    let a_maj_sym = match a_hist.major_symbol() {
-        Some(maj) => maj,
-        _ => return None,
-    };
-
-    let b_maj_sym = match b_hist.major_symbol() {
-        Some(maj) => maj,
-        _ => return None,
-    };
 
     let mut PA = 0f32;
     let mut Pa = 0f32;
@@ -362,6 +361,9 @@ pub fn single_weighted_ld_pair(a: &[Symbol], b: &[Symbol], weights: &[f32]) -> O
         if a[seq] == a_maj_sym {
             PA += weights[seq];
         } else {
+            // good_mask has already filtered down the sequences to ones where
+            // a is either a_maj_sym or a_min_sym -> if a isn't a_maj_sym it
+            // must be a_min_sym.
             Pa += weights[seq];
         }
 
@@ -422,93 +424,103 @@ pub fn single_weighted_ld_pair(a: &[Symbol], b: &[Symbol], weights: &[f32]) -> O
     Some(LdStats { r2, d, d_prime })
 }
 
-pub struct PairStore {
-    n_sites: usize,
-    buffer: Vec<Option<LdStats>>,
+struct PairData<T> {
+    first_idx: usize,
+    second_idx: usize,
+    data: T
 }
 
-impl PairStore {
-    pub fn new(n_sites: usize) -> Self {
-        if log_enabled!(Level::Info) {
-            let expected_mem_usage = n_sites * n_sites * std::mem::size_of::<Option<LdStats>>();
-            let expected_mem_usage = Formatter::new()
-                .with_scales(Scales::Binary())
-                .with_units("B")
-                .format(expected_mem_usage as f64);
-            info!(
-                "Creating a new in-memory store for pairwise LD data, expected memory usage: {}",
-                expected_mem_usage
-            )
-        }
+pub struct PairStore<T> {
+    chunks: Vec<Vec<PairData<T>>>,
+}
 
-        Self {
-            n_sites,
-            buffer: vec![None; n_sites * n_sites],
+impl<T> PairStore<T> {
+    pub fn iter(&self) -> PairStoreIter<T> {
+        PairStoreIter {
+            store: self,
+            chunk_idx: 0,
+            pair_idx: 0,
         }
     }
     
     pub fn len(&self) -> usize {
-        (self.n_sites - 1) * (self.n_sites - 2) / 2
-    }
-
-    fn linear_idx(&self, first_idx: usize, second_idx: usize) -> usize {
-        debug_assert_ne!(first_idx, second_idx);
-        let (first_idx, second_idx) = if first_idx < second_idx {
-            (first_idx, second_idx)
-        } else {
-            (second_idx, first_idx)
-        };
-
-        // TODO: Inefficient - uses ~twice as much memory as needed
-        first_idx + second_idx * self.n_sites
-    }
-
-    pub fn get_pair(&self, first_idx: usize, second_idx: usize) -> Option<LdStats> {
-        self.buffer[self.linear_idx(first_idx, second_idx)]
-    }
-
-    pub fn write_pair(&mut self, first_idx: usize, second_idx: usize, ld_stat: Option<LdStats>) {
-        let linear_idx = self.linear_idx(first_idx, second_idx);
-        self.buffer[linear_idx] = ld_stat;
-    }
-
-    /// As write_pair, but with an immutable receiver.
-    ///
-    /// It is up to the caller to ensure that the given pair of indices is not being read from or
-    /// written to concurrently by any other thread of execution.
-    unsafe fn write_pair_unsafe(&self, first_idx: usize, second_idx: usize, ld_stat: Option<LdStats>) {
-        let linear_idx = self.linear_idx(first_idx, second_idx);
-        let ptr = &self.buffer[linear_idx] as *const _ as *mut Option<LdStats>;
-        ptr.write(ld_stat);
+        self.chunks
+            .iter()
+            .map(|c| c.len())
+            .sum()
     }
 }
+
+pub struct PairStoreIter<'a, T> {
+    store: &'a PairStore<T>,
+
+    /// Index of the next chunk
+    chunk_idx: usize,
+    
+    /// Index of the next pair within the next chunk
+    pair_idx: usize,
+}
+
+impl<'a, T> Iterator for PairStoreIter<'a, T> {
+    type Item = (usize, usize, &'a T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let ret = if self.chunk_idx < self.store.chunks.len() {
+            let elem = &self.store.chunks[self.chunk_idx][self.pair_idx];
+            (elem.first_idx, elem.second_idx, &elem.data)
+        } else {
+            return None;
+        };
+        
+        self.pair_idx += 1;
+        if self.pair_idx >= self.store.chunks[self.chunk_idx].len() {
+            self.pair_idx = 0;
+            self.chunk_idx += 1;
+        }
+
+        Some(ret)
+    }
+}
+
 
 pub fn all_weighted_ld_pairs(
     site_set: &SiteSet,
     weights: &[f32],
-    store: &mut PairStore,
+    r2_threshold: f32,
     mut progress_report: impl FnMut(usize) + Send,
-) {
+) -> PairStore<LdStats> {
     progress_report(0);
 
     let computed_pair_count = AtomicUsize::new(0);
     let progress_report = Mutex::new(progress_report);
 
-    for first_idx in 0..(site_set.n_sites() - 1) {
-        ((first_idx + 1)..site_set.n_sites()).into_par_iter()
-            .for_each(|second_idx| {
-                let a = &site_set[first_idx];
+    let data_chunks = (0..(site_set.n_sites() - 1)).into_par_iter()
+        .map(|first_idx| {
+            let a = &site_set[first_idx];
+            let mut results_chunk = Vec::new();
+            for second_idx in (first_idx + 1)..site_set.n_sites() {
                 let b = &site_set[second_idx];
-                let ld_stat = single_weighted_ld_pair(a, b, weights);
-
-                unsafe { store.write_pair_unsafe(first_idx, second_idx, ld_stat); }
-
-                let computed = computed_pair_count.fetch_add(1, Ordering::Relaxed);
-                // Avoid spamming the progress bar every single time
-                if computed % 5_000 == 0 {
-                    (progress_report.lock().expect("Failed to get lock on progress indicator callback"))(computed);
+                if let Some(ld_stat) = single_weighted_ld_pair(a, b, weights) {
+                    if ld_stat.r2 > r2_threshold {
+                        results_chunk.push(PairData {
+                            first_idx: site_set.parent_site_index(first_idx),
+                            second_idx: site_set.parent_site_index(second_idx),
+                            data: ld_stat,
+                        });
+                    }
                 }
-            });
+            }
+            
+            let computed = computed_pair_count.fetch_add(site_set.n_sites() - first_idx - 1, Ordering::Relaxed);
+            (progress_report.lock().expect("Failed to get lock on progress indicator callback"))(computed);
+            
+            results_chunk
+        })
+        .filter(|chunk| chunk.len() > 0)
+        .collect::<Vec<Vec<PairData<LdStats>>>>();
+    
+    PairStore {
+        chunks: data_chunks
     }
 }
 
@@ -535,13 +547,15 @@ mod tests {
         let hist = SymbolHistogram {
             data: [0, 1, 10, 2, 0, 0],
         };
-        let maj = hist.major_symbol();
+        let (maj, min) = hist.major_minor_symbols();
         assert_eq!(maj, Some(G));
+        assert_eq!(min, Some(T));
 
         let hist = SymbolHistogram {
-            data: [10, 1, 9, 2, 0, 0],
+            data: [1, 9, 10, 2, 0, 0],
         };
-        let maj = hist.major_symbol();
-        assert_eq!(maj, Some(A));
+        let (maj, min) = hist.major_minor_symbols();
+        assert_eq!(maj, Some(G));
+        assert_eq!(min, Some(C));
     }
 }
