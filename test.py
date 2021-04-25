@@ -118,14 +118,15 @@ class TestStuff(unittest.TestCase):
         # flat weights, total LD, simple example
         min_acgt = 0.8
         min_variability = 0.02
-        file = "tests/t7_henikoff_paper_ld.fasta"
+        #file = "tests/t7_henikoff_paper_ld.fasta"
+        file = "tests/t1_henikoff_paper.fasta"
         alignment = wld.read_fasta(file)
         # print(alignment)
         var_sites_HK, var_sites_LD = wld.compute_variable_sites(
             alignment, min_acgt, min_variability)
         # print(var_sites_LD)
-        # weightsHK = wld.henikoff_weighting(alignment[:, var_sites_HK])
-        weightsHK = np.array([1, 1, 1, 1, 1, 1])
+        weightsHK = wld.henikoff_weighting(alignment[:, var_sites_HK])
+        # weightsHK = np.array([1, 1, 1, 1, 1, 1])
         alignment = alignment[:, var_sites_LD]
         site_map = np.where(var_sites_LD)[0]
 
@@ -137,7 +138,10 @@ class TestStuff(unittest.TestCase):
 
         sys.stdout = sys.__stdout__             # Reset redirect.
         print(capturedOutput.getvalue())
+        #self.assertEqual(capturedOutput.getvalue()[32:33], "1")
 
 
+"""
+"""
 if __name__ == '__main__':
     unittest.main()
