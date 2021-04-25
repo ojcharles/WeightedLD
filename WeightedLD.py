@@ -11,7 +11,7 @@ import numpy as np
 
 logging.basicConfig(
     format='[%(levelname)s] %(asctime)s %(message)s',
-    level=logging.INFO,
+    level=logging.ERROR,
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 
@@ -202,11 +202,12 @@ def ld(alignment, weights, site_map):
                     skip_site = True
                 # identifies positions with major_allele
                 major_symbol = unique_elements[counts.argmax()]
+                major_symbol = unique_elements[np.argsort(-counts)[0]]
                 target_sites_major[target_sites[:, site]
                                    == major_symbol, site] = True
                 if not skip_site:
                     # identifies positions with domMino_allele, if two are equal takes first
-                    domMinor_symbol = unique_elements[counts.argsort()[1]]
+                    domMinor_symbol = unique_elements[np.argsort(-counts)[1]]
                     target_sites_domMinor[target_sites[:, site]
                                           == domMinor_symbol, site] = True
             if skip_site:
@@ -295,17 +296,22 @@ def main(args):
     logging.info("Found %s sites of interest", var_sites_LD.sum())
 
     logging.info("Computing Henikoff weights for each sequence")
-    weightsHK = henikoff_weighting(alignment[:, var_sites_HK])
+
+    # default behaviour is Henikoff weighting, can be disabled
+    if args.unweighted:
+        print("unweighted")
+        weights = np.zeros(alignment.shape[0], dtype=np.uint16)
+        weights[weights == 0] = 1
+    else:
+        print("Henikoff")
+        weights = henikoff_weighting(alignment[:, var_sites_HK])
+        print(weights)
 
     # Trim down the alignment array to only include the sites of interest
     alignment = alignment[:, var_sites_LD]
 
     # Maps site indices in the trimmed down array to site indices in the original alignment
     site_map = np.where(var_sites_LD)[0]
-
-    weights1 = np.zeros(alignment.shape[0], dtype=np.uint16)
-    weights1[weights1 == 0] = 1
-    weights = weights1
 
     logging.info("Computing the LD parameters")
     ld(alignment, weights, site_map)
@@ -320,6 +326,8 @@ if __name__ == "__main__":
             increase this to remove more noise say 0.5")
     parser.add_argument("--min-variability", type=float, default=0.02,
                         help="Minimum fraction of minor symbols for a site to be considered")
+    parser.add_argument("--unweighted", action='store_true', default=False,
+                        help="Use unit weights instead of Henikoff weights")
 
     args = parser.parse_args()
     main(args)

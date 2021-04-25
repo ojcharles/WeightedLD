@@ -5,7 +5,7 @@ __pycache__
 todo
 code/
 build/
-rust/target/
+rust/weighted_ld/target/
 
 # we will load the paper stats and maybe an R/py notebook along with the paper, but ignore for now
 paper/
