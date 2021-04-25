@@ -298,13 +298,14 @@ def main(args):
     logging.info("Computing Henikoff weights for each sequence")
 
     # default behaviour is Henikoff weighting, can be disabled
-    # if args.unweighted is not None:
-    #    print("unweighted")
-    #    weights = np.zeros(alignment.shape[0], dtype=np.uint16)
-    #    weights[weights == 0] = 1
-    # else:
-    # print("Henikoff")
-    weights = henikoff_weighting(alignment[:, var_sites_HK])
+    if args.unweighted:
+        print("unweighted")
+        weights = np.zeros(alignment.shape[0], dtype=np.uint16)
+        weights[weights == 0] = 1
+    else:
+        print("Henikoff")
+        weights = henikoff_weighting(alignment[:, var_sites_HK])
+        print(weights)
 
     # Trim down the alignment array to only include the sites of interest
     alignment = alignment[:, var_sites_LD]
@@ -325,8 +326,8 @@ if __name__ == "__main__":
             increase this to remove more noise say 0.5")
     parser.add_argument("--min-variability", type=float, default=0.02,
                         help="Minimum fraction of minor symbols for a site to be considered")
-    # parser.add_argument("--unweighted", type=bool, default=False,
-    #                    help="Use unit weights instead of Henikoff weights")
+    parser.add_argument("--unweighted", action='store_true', default=False,
+                        help="Use unit weights instead of Henikoff weights")
 
     args = parser.parse_args()
     main(args)
