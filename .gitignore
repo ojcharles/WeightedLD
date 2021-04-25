@@ -3,8 +3,9 @@
 .vscode
 __pycache__
 todo
-build/
 code/
+build/
+rust/target/
 
 # we will load the paper stats and maybe an R/py notebook along with the paper, but ignore for now
 paper/

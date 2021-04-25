@@ -10,32 +10,6 @@ class TestStuff(unittest.TestCase):
     min_acgt = 0.8
     min_variability = 0.02
 
-    def test_ld_considers_only_Major_donMinor(self):
-        # flat weights, total LD, simple example
-        min_acgt = 0.8
-        min_variability = 0.02
-        file = "tests/t7_henikoff_paper_ld.fasta"
-        alignment = wld.read_fasta(file)
-        # print(alignment)
-        var_sites_HK, var_sites_LD = wld.compute_variable_sites(
-            alignment, min_acgt, min_variability)
-        # print(var_sites_LD)
-        #weightsHK = wld.henikoff_weighting(alignment[:, var_sites_HK])
-        weightsHK = np.array([1, 1, 1, 1, 1, 1])
-        alignment = alignment[:, var_sites_LD]
-        site_map = np.where(var_sites_LD)[0]
-
-        # capture stdout
-        capturedOutput = io.StringIO()          # Create io object
-        sys.stdout = capturedOutput             # to which we redirect stdout.
-
-        wld.ld(alignment, weightsHK, site_map)  # run function as normal
-
-        sys.stdout = sys.__stdout__             # Reset redirect.
-        print(capturedOutput.getvalue())
-
-
-"""
     def test_read_fasta(self):
         # test the fasta read and hashmap to integers
         file = "tests/t1_henikoff_paper.fasta"
@@ -63,7 +37,6 @@ class TestStuff(unittest.TestCase):
         min_variability = 0.2
         var_sites_HK, var_sites_LD = wld.compute_variable_sites(
             alignment, self.min_acgt, min_variability)
-
         self.assertNotEqual(var_sites_HK[1], var_sites_LD[1])
 
     def test_hkw_simple(self):
@@ -140,23 +113,31 @@ class TestStuff(unittest.TestCase):
 
         self.assertEqual(capturedOutput.getvalue()[22:27], "-0.25")     # D
         self.assertEqual(capturedOutput.getvalue()[32:33], "1")         # r2
-"""
+
+    def test_ld_considers_only_Major_donMinor(self):
+        # flat weights, total LD, simple example
+        min_acgt = 0.8
+        min_variability = 0.02
+        file = "tests/t7_henikoff_paper_ld.fasta"
+        alignment = wld.read_fasta(file)
+        # print(alignment)
+        var_sites_HK, var_sites_LD = wld.compute_variable_sites(
+            alignment, min_acgt, min_variability)
+        # print(var_sites_LD)
+        # weightsHK = wld.henikoff_weighting(alignment[:, var_sites_HK])
+        weightsHK = np.array([1, 1, 1, 1, 1, 1])
+        alignment = alignment[:, var_sites_LD]
+        site_map = np.where(var_sites_LD)[0]
+
+        # capture stdout
+        capturedOutput = io.StringIO()          # Create io object
+        sys.stdout = capturedOutput             # to which we redirect stdout.
+
+        wld.ld(alignment, weightsHK, site_map)  # run function as normal
+
+        sys.stdout = sys.__stdout__             # Reset redirect.
+        print(capturedOutput.getvalue())
 
 
 if __name__ == '__main__':
     unittest.main()
-
-
-"""
-posa	posb	D	D'	R2
-3	4	-0.2222	0.6667	1.0
-3	5	-0.2222	0.6667	1.0
-3	6	-0.2222	0.6667	1.0
-3	7	-0.2222	0.6667	1.0
-4	5	-0.2222	0.6667	1.0
-4	6	-0.2222	0.6667	1.0
-4	7	-0.2222	0.6667	1.0
-5	6	-0.2222	0.6667	1.0
-5	7	-0.2222	0.6667	1.0
-6	7	-0.2222	0.6667	1.0
-"""

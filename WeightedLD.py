@@ -189,11 +189,13 @@ def ld(alignment, weights, site_map):
             target_sites_major = np.zeros_like(target_sites, dtype=np.bool8)
             target_sites_domMinor = np.zeros_like(target_sites, dtype=np.bool8)
 
+            # astype np.bool8
+
             skip_site = False
             for site in (0, 1):
                 unique_elements, counts = np.unique(
                     target_sites[:, site], return_counts=True)
-                if len(unique_elements) == 1:
+                if len(unique_elements) <= 1:
                     # After removing the bad sequences, one or both of the
                     # sites may no longer be variable. Stop calculations here
                     # if that is the case.
@@ -202,24 +204,26 @@ def ld(alignment, weights, site_map):
                 major_symbol = unique_elements[counts.argmax()]
                 target_sites_major[target_sites[:, site]
                                    == major_symbol, site] = True
-                # identifies positions with domMino_allele, if two are equal takes first
-                domMinor_symbol = unique_elements[np.argpartition(-counts, kth=2)[
-                    :2]][1]
-                target_sites_domMinor[target_sites[:, site]
-                                      == domMinor_symbol, site] = True
+                if not skip_site:
+                    # identifies positions with domMino_allele, if two are equal takes first
+                    domMinor_symbol = unique_elements[counts.argsort()[1]]
+                    target_sites_domMinor[target_sites[:, site]
+                                          == domMinor_symbol, site] = True
             if skip_site:
                 continue
 
             # second round of filtering - remove anything thats not Major or domMinor
-            # //todo union the two 2d boolean arrays and get or, should leave a 1d T/F with else as anything else
-            print(target_sites_major)
+            # identify seqs with Maj or domMinor in both sites -> keep
+            keep_first = target_sites_major[:, 0] + target_sites_domMinor[:, 0]
+            keep_second = target_sites_major[:,
+                                             1] + target_sites_domMinor[:, 1]
+            keep = np.array([keep_first, keep_second]).all(axis=0)
 
-            # print(target_sites_domMinor)
-            #print(np.logical_and(target_sites_major, target_sites_domMinor))
-            # good_sequences =
-            #target_sites = target_sites[good_sequences, :]
-            #target_weights = weights[good_sequences]
-            #target_seqs = target_sites.shape[0]
+            # filter again
+            target_sites = target_sites[keep, :]
+            target_weights = weights[keep]
+            target_sites_major = target_sites_major[keep, ]
+            target_seqs = target_sites.shape[0]
 
             total_weight = target_weights.sum()
             PA, PB = np.ma.masked_array(target_weights.reshape(-1, 1).repeat(
@@ -264,7 +268,7 @@ def ld(alignment, weights, site_map):
             else:
                 denominator = min([ld_obs[1], ld_obs[2]])
                 if denominator == 0:
-                    denominator = max([ld_obms[1], ld_obs[2]])
+                    denominator = max([ld_obs[1], ld_obs[2]])
             DPrime = D / denominator
 
             # calculate R2
