@@ -587,4 +587,19 @@ mod tests {
         ]);
         assert_ulps_eq!(henikoff_weights(&siteset)[..], [1.0, 0.68, 0.68, 1.0]);
     }
+
+    #[test]
+    fn test_single_weighted_ld_pair() {
+        use Symbol::*;
+        let a = [A, A, A, A, C, A, C];
+        let b = [A, A, A, G, T, A, A];
+        let weights = [1.0, 1.0, 0.4, 0.2, 0.5, 0.8, 0.2];
+
+        let ld_stats = single_weighted_ld_pair(&a, &b, &weights)
+            .expect("Expected test case to have LD statistics available");
+
+        assert_abs_diff_eq!(ld_stats.d, 0.00308, epsilon = 1e-5);
+        assert_abs_diff_eq!(ld_stats.d_prime, -0.05555, epsilon = 1e-5);
+        assert_abs_diff_eq!(ld_stats.r2, 0.00346, epsilon = 1e-5);
+    }
 }
