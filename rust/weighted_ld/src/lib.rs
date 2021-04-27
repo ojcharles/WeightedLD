@@ -1,7 +1,7 @@
 use std::{
     fs::File,
     io::{BufRead, BufReader},
-    iter::Sum,
+    marker::PhantomData,
     ops::{Index, IndexMut},
     path::{Path, PathBuf},
     sync::{
@@ -51,7 +51,6 @@ impl From<char> for Symbol {
             _ => Self::Unknown,
         }
     }
-
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, FromPrimitive)]
@@ -62,40 +61,71 @@ pub enum MajMin {
     Other,
 }
 
-pub struct SymbolHistogram<T: num::Integer> {
-    data: [T; 6],
+const SYMBOL_HISTOGRAM_CAPACITY: usize = 16;
+
+pub unsafe trait Histogrammable: Sized + Copy {
+    const VARIANT_COUNT: usize;
+    fn to_index(&self) -> usize;
 }
 
-impl<T: num::Integer> Index<Symbol> for SymbolHistogram<T> {
-    type Output = T;
+unsafe impl Histogrammable for Symbol {
+    const VARIANT_COUNT: usize = 6;
 
-    fn index(&self, index: Symbol) -> &Self::Output {
-        &self.data[index as usize]
+    fn to_index(&self) -> usize {
+        *self as usize
     }
 }
 
-impl<T: num::Integer> IndexMut<Symbol> for SymbolHistogram<T> {
-    fn index_mut(&mut self, index: Symbol) -> &mut Self::Output {
-        &mut self.data[index as usize]
+unsafe impl Histogrammable for MajMin {
+    const VARIANT_COUNT: usize = 3;
+
+    fn to_index(&self) -> usize {
+        *self as usize
     }
 }
 
-impl<T: num::Integer + Copy + Sum> SymbolHistogram<T> {
+pub struct SymbolHistogram<T: Histogrammable> {
+    data: [usize; SYMBOL_HISTOGRAM_CAPACITY],
+    _phantom: PhantomData<T>,
+}
+
+impl<T: Histogrammable> Index<T> for SymbolHistogram<T> {
+    type Output = usize;
+
+    fn index(&self, sym: T) -> &Self::Output {
+        &self.data[sym.to_index()]
+    }
+}
+
+impl<T: Histogrammable> IndexMut<T> for SymbolHistogram<T> {
+    fn index_mut(&mut self, sym: T) -> &mut Self::Output {
+        &mut self.data[sym.to_index()]
+    }
+}
+
+impl<T: Histogrammable> SymbolHistogram<T> {
     fn zero() -> Self {
         Self {
-            data: [T::zero(); 6],
+            data: [0; SYMBOL_HISTOGRAM_CAPACITY],
+            _phantom: PhantomData,
         }
     }
 
-    fn from_slice(symbols: &[Symbol]) -> Self {
+    fn from_slice(symbols: &[T]) -> Self {
         let mut hist = Self::zero();
         for symbol in symbols {
-            hist[*symbol] = hist[*symbol].add(T::one());
+            hist[*symbol] += 1;
         }
         hist
     }
 
-    fn acgt(&self) -> T {
+    fn total(&self) -> usize {
+        self.data.iter().sum()
+    }
+}
+
+impl SymbolHistogram<Symbol> {
+    fn acgt(&self) -> usize {
         use Symbol::*;
         self[A] + self[C] + self[G] + self[T]
     }
@@ -105,10 +135,10 @@ impl<T: num::Integer + Copy + Sum> SymbolHistogram<T> {
         let mut minor = None;
 
         for sym in &[Symbol::A, Symbol::C, Symbol::G, Symbol::T, Symbol::Missing] {
-            if self[*sym] > major.map(|m| self[m]).unwrap_or(T::zero()) {
+            if self[*sym] > major.map(|m| self[m]).unwrap_or(0) {
                 minor = major;
                 major = Some(*sym);
-            } else if self[*sym] > minor.map(|m| self[m]).unwrap_or(T::zero()) {
+            } else if self[*sym] > minor.map(|m| self[m]).unwrap_or(0) {
                 minor = Some(*sym);
             }
         }
@@ -219,12 +249,12 @@ impl SiteSet<Symbol> {
     pub fn to_maj_min(&self) -> SiteSet<MajMin> {
         let mut new_buffer = vec![MajMin::Other; self.buffer.len()];
         for site in 0..self.n_sites() {
-            let hist = SymbolHistogram::<u32>::from_slice(&self[site]);
+            let hist = SymbolHistogram::from_slice(&self[site]);
             let (maj, min) = match hist.major_minor_symbols() {
                 (Some(maj), Some(min)) => (maj, min),
                 _ => continue,
             };
-            
+
             for seq in 0..self.n_seqs() {
                 new_buffer[site * self.n_seqs() + seq] = match self[site][seq] {
                     x if x == maj => MajMin::Major,
@@ -233,7 +263,7 @@ impl SiteSet<Symbol> {
                 };
             }
         }
-        
+
         SiteSet {
             n_sites: self.n_sites(),
             n_seqs: self.n_seqs(),
@@ -276,12 +306,13 @@ pub fn read_fasta<P: AsRef<Path>>(path: P) -> Result<MultiSequence, std::io::Err
 }
 
 /// Given a slice of all symbols in a site, should the site be considered for LD computations
-pub fn is_site_of_interest(site: &[Symbol], min_acgt: u32, min_minor: f32, max_minor: f32) -> bool {
-    let hist = SymbolHistogram::<u32>::from_slice(site);
+pub fn is_site_of_interest(site: &[Symbol], min_acgt: f32, min_minor: f32, max_minor: f32) -> bool {
+    let hist = SymbolHistogram::from_slice(site);
 
-    let acgt_count = hist.acgt();
+    let acgt_count = hist.acgt() as f32;
+    let total_count = hist.total() as f32;
 
-    if acgt_count <= min_acgt {
+    if (acgt_count / total_count) <= min_acgt {
         // There aren't enough ACGT symbols at this site
         false
     } else {
@@ -293,9 +324,9 @@ pub fn is_site_of_interest(site: &[Symbol], min_acgt: u32, min_minor: f32, max_m
         let maj_count = hist[major_sym] as f32;
         let min_count = hist[minor_sym] as f32;
 
-        // let minor_frac = min_count / acgt_count as f32;
+        // let minor_frac = min_count / acgt_count;
         let minor_frac = min_count / (min_count + maj_count);
-        // let minor_frac = (acgt_count as f32 - min_count) / acgt_count as f32;
+        // let minor_frac = (acgt_count - min_count) / acgt_count;
 
         if minor_frac < min_minor || minor_frac > max_minor {
             // The fraction of minor symbols is either too low or too high
@@ -306,7 +337,23 @@ pub fn is_site_of_interest(site: &[Symbol], min_acgt: u32, min_minor: f32, max_m
     }
 }
 
-pub fn henikoff_weights(data: &SiteSet<Symbol>) -> Vec<f32> {
+pub trait Henikoffable: Histogrammable + Eq + 'static {
+    fn exclude_syms() -> &'static [Self];
+}
+
+impl Henikoffable for Symbol {
+    fn exclude_syms() -> &'static [Self] {
+        &[Self::Unknown]
+    }
+}
+
+impl Henikoffable for MajMin {
+    fn exclude_syms() -> &'static [Self] {
+        &[Self::Other]
+    }
+}
+
+pub fn henikoff_weights<T: Henikoffable>(data: &SiteSet<T>) -> Vec<f32> {
     let mut contributions = Array2::<f32>::zeros((data.n_sites(), data.n_seqs()));
 
     for site in 0..data.n_sites() {
@@ -326,14 +373,31 @@ pub fn henikoff_weights(data: &SiteSet<Symbol>) -> Vec<f32> {
     weights.into_raw_vec()
 }
 
-pub fn henikoff_site_contributions(site: &[Symbol], contributions: &mut [f32]) {
-    let hist = SymbolHistogram::<u32>::from_slice(site);
+pub fn henikoff_site_contributions<T: Henikoffable>(site: &[T], contributions: &mut [f32]) {
+    fn is_excluded<T: Henikoffable>(s: &T) -> bool {
+        for x in T::exclude_syms().iter() {
+            if s == x {
+                return true;
+            }
+        }
 
-    let nuc_count = hist.acgt() as f32 + hist[Symbol::Missing] as f32;
+        false
+    }
+
+    let hist = SymbolHistogram::from_slice(site);
+
+    let nuc_count = {
+        let mut x = hist.total();
+        for exclude in T::exclude_syms() {
+            x -= hist[*exclude];
+        }
+        x as f32
+    };
+
     let mut total_site_contrib = 0f32;
 
     for (idx, sym) in site.iter().enumerate() {
-        if *sym != Symbol::Unknown {
+        if !is_excluded(sym) {
             contributions[idx] = 1f32 / (nuc_count * hist[*sym] as f32);
             total_site_contrib += contributions[idx];
         }
@@ -342,7 +406,7 @@ pub fn henikoff_site_contributions(site: &[Symbol], contributions: &mut [f32]) {
     let mean_site_contrib = total_site_contrib / nuc_count;
 
     for (idx, sym) in site.iter().enumerate() {
-        if *sym == Symbol::Unknown {
+        if is_excluded(sym) {
             contributions[idx] = mean_site_contrib;
         }
     }
@@ -499,7 +563,7 @@ impl<'a, T> Iterator for PairStoreIter<'a, T> {
 }
 
 pub fn all_weighted_ld_pairs(
-    site_set: &SiteSet<MajMin>,
+    siteset: &SiteSet<MajMin>,
     weights: &[f32],
     r2_threshold: f32,
     mut progress_report: impl FnMut(usize) + Send,
@@ -509,26 +573,26 @@ pub fn all_weighted_ld_pairs(
     let computed_pair_count = AtomicUsize::new(0);
     let progress_report = Mutex::new(progress_report);
 
-    let data_chunks = (0..(site_set.n_sites() - 1))
+    let data_chunks = (0..(siteset.n_sites() - 1))
         .into_par_iter()
         .map(|first_idx| {
-            let a = &site_set[first_idx];
+            let a = &siteset[first_idx];
             let mut results_chunk = Vec::new();
-            for second_idx in (first_idx + 1)..site_set.n_sites() {
-                let b = &site_set[second_idx];
+            for second_idx in (first_idx + 1)..siteset.n_sites() {
+                let b = &siteset[second_idx];
                 if let Some(ld_stat) = single_weighted_ld_pair(a, b, weights) {
                     if ld_stat.r2 > r2_threshold {
                         results_chunk.push(PairData {
-                            first_idx: site_set.parent_site_index(first_idx),
-                            second_idx: site_set.parent_site_index(second_idx),
+                            first_idx: siteset.parent_site_index(first_idx),
+                            second_idx: siteset.parent_site_index(second_idx),
                             data: ld_stat,
                         });
                     }
                 }
             }
 
-            let computed = computed_pair_count
-                .fetch_add(site_set.n_sites() - first_idx - 1, Ordering::Relaxed);
+            let computed =
+                computed_pair_count.fetch_add(siteset.n_sites() - first_idx - 1, Ordering::Relaxed);
             (progress_report
                 .lock()
                 .expect("Failed to get lock on progress indicator callback"))(computed);
@@ -551,7 +615,7 @@ mod tests {
     fn test_histogram_from_slice() {
         use Symbol::*;
         let a = [A, A, A, C, C, G, T, T, T, T];
-        let hist = SymbolHistogram::<u8>::from_slice(&a);
+        let hist = SymbolHistogram::from_slice(&a);
 
         assert_eq!(hist[A], 3);
         assert_eq!(hist[C], 2);
@@ -563,16 +627,20 @@ mod tests {
     fn test_hist_major_minor() {
         use Symbol::*;
 
-        let hist = SymbolHistogram {
-            data: [0, 1, 10, 2, 0, 0],
-        };
+        let mut hist = SymbolHistogram::zero();
+        hist[A] = 0;
+        hist[C] = 1;
+        hist[G] = 10;
+        hist[T] = 2;
         let (maj, min) = hist.major_minor_symbols();
         assert_eq!(maj, Some(G));
         assert_eq!(min, Some(T));
 
-        let hist = SymbolHistogram {
-            data: [1, 9, 10, 2, 0, 0],
-        };
+        let mut hist = SymbolHistogram::zero();
+        hist[A] = 1;
+        hist[C] = 9;
+        hist[G] = 10;
+        hist[T] = 2;
         let (maj, min) = hist.major_minor_symbols();
         assert_eq!(maj, Some(G));
         assert_eq!(min, Some(C));
