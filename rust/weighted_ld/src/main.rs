@@ -67,7 +67,7 @@ struct Opt {
     unweighted: bool,
 }
 
-fn write_henikoff_weights(path: &PathBuf, weights: &[f32]) -> Result<(), std::io::Error> {
+fn write_weights(path: &PathBuf, weights: &[f32]) -> Result<(), std::io::Error> {
     let file = File::create(path)?;
     let mut w = BufWriter::new(file);
 
@@ -118,15 +118,14 @@ fn write_pair_stats(
     Ok(())
 }
 
-fn main() -> Result<(), std::io::Error> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+struct PreparedData {
+    siteset: SiteSet<MajMin>,
+    weights: Vec<f32>,
+}
 
-    let opt = Opt::from_args();
-
-    debug!("{:?}", opt);
-
+fn read_and_prepare_fasta(path: &PathBuf, options: &Opt) -> Result<PreparedData, std::io::Error> {
     let sw = Instant::now();
-    let multiseq = read_fasta(opt.fasta_input)?;
+    let multiseq = read_fasta(path)?;
     let siteset = SiteSet::from_multiseq(&multiseq);
     info!("Loaded fasta file in {:?}", sw.elapsed());
     info!(
@@ -136,9 +135,9 @@ fn main() -> Result<(), std::io::Error> {
     );
 
     let sw = Instant::now();
-    let min_acgt = (opt.min_acgt * siteset.n_seqs() as f32).ceil() as u32;
-    let min_minor = opt.min_minor;
-    let max_minor = opt.max_minor;
+    let min_acgt = options.min_acgt;
+    let min_minor = options.min_minor;
+    let max_minor = options.max_minor;
     let filtered_siteset = siteset
             .filter_by(|s| is_site_of_interest(s, min_acgt, min_minor, max_minor));
     info!(
@@ -147,25 +146,38 @@ fn main() -> Result<(), std::io::Error> {
     );
     info!("    Found {} sites of interest", filtered_siteset.n_sites());
 
-    let weights = if opt.unweighted {
-        std::iter::repeat(1f32)
-            .take(siteset.n_seqs())
-            .collect::<Vec<_>>()
+    let weights = if options.unweighted {
+        vec![1f32; siteset.n_seqs()]
     } else {
         let sw = Instant::now();
         let weights = henikoff_weights(&filtered_siteset);
         info!("Computed Henikoff weights in {:?}", sw.elapsed());
         weights
     };
+    
+    Ok(PreparedData {
+        siteset: filtered_siteset.to_maj_min(),
+        weights,
+    })
+}
+
+fn main() -> Result<(), std::io::Error> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    let opt = Opt::from_args();
+
+    debug!("{:?}", opt);
+
+    let data = read_and_prepare_fasta(&opt.fasta_input, &opt)?;
 
     if let Some(weights_filepath) = opt.weights_output {
         info!("Writing weights to {:?}", weights_filepath);
-        write_henikoff_weights(&weights_filepath, &weights)?;
+        write_weights(&weights_filepath, &data.weights)?;
     }
 
     info!("Beginning pairwise weighted LD computation");
     let sw = Instant::now();
-    let total_pairs = (filtered_siteset.n_sites() - 1) * (filtered_siteset.n_sites() - 2) / 2;
+    let total_pairs = (data.siteset.n_sites() - 1) * (data.siteset.n_sites() - 2) / 2;
     let pair_store = {
         let pb = if log_enabled!(Level::Info) {
             let bar = ProgressBar::new(total_pairs as u64);
@@ -178,8 +190,8 @@ fn main() -> Result<(), std::io::Error> {
         };
 
         all_weighted_ld_pairs(
-            &filtered_siteset.to_maj_min(),
-            &weights,
+            &data.siteset,
+            &data.weights,
             opt.r2_threshold,
             |computed| {
                 if let Some(pb) = &pb {
