@@ -4,15 +4,19 @@ use std::{
     marker::PhantomData,
     ops::{Index, IndexMut},
     path::{Path, PathBuf},
+    str::FromStr,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Mutex,
     },
 };
 
+use log::{debug, error};
 use ndarray::prelude::*;
 use num_derive::FromPrimitive;
 use rayon::prelude::*;
+use noodles::vcf;
+use vcf::record::genotype::field::{Key, Value};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, FromPrimitive)]
 #[repr(u8)]
@@ -312,6 +316,115 @@ pub fn read_fasta<P: AsRef<Path>>(path: P) -> Result<MultiSequence, std::io::Err
     }
 
     Ok(MultiSequence { source, sequences })
+}
+
+#[derive(Debug)]
+pub enum ReadVcfError {
+    Io(std::io::Error),
+    ParseError(vcf::header::ParseError),
+    MismatchedGenotypeLen,
+    MissingGenotypeKey,
+    NonStringGenotype,
+    BadFile,
+}
+
+impl From<std::io::Error> for ReadVcfError {
+    fn from(v: std::io::Error) -> Self {
+        Self::Io(v)
+    }
+}
+
+impl From<vcf::header::ParseError> for ReadVcfError {
+    fn from(v: vcf::header::ParseError) -> Self {
+        Self::ParseError(v)
+    }
+}
+
+pub fn read_vcf<P: AsRef<Path>>(path: P) -> Result<SiteSet<MajMin>, ReadVcfError> {
+    let file = File::open(path.as_ref())?;
+    let reader = BufReader::new(file);
+    let mut reader = vcf::Reader::new(reader);
+
+    // NB: Have to extract the header from the reader first, even if we don't need it.
+    let header = vcf::Header::from_str(&reader.read_header()?)?;
+    debug!("VCF sample count = {}", header.samples().len());
+    debug!("VCF contigs count = {}", header.contigs().len());
+    
+    let mut buffer = Vec::new();
+    let mut n_seqs = None;
+    let mut n_sites = 0;
+    let mut site_map = Vec::new();
+    for r in reader.records() {
+        let r = r?;
+
+        debug!("VCF genotype len = {}", r.genotypes().len());
+        debug!("First genotype = {:?}", r.genotypes()[0]);
+
+        match n_seqs {
+            Some(x) if r.genotypes().len() != x => return Err(ReadVcfError::MismatchedGenotypeLen),
+            None => n_seqs = Some(r.genotypes().len()),
+            _ => (),
+        };
+        let n_seqs = n_seqs.unwrap();
+
+        // This record is two "sites" interleaved, as we treat each strand as a separate site
+        n_sites += 2;
+        let index = i32::from(r.position()) as usize;
+        site_map.push(SiteIndex { index, strand: 0, });
+        site_map.push(SiteIndex { index, strand: 1, });
+
+        // Reserve space in the buffer for both of the strands
+        let slice_start = buffer.len();
+        buffer.extend(std::iter::repeat(MajMin::Other).take(n_seqs * 2));
+        let buff_slice = &mut buffer[slice_start..];
+
+        for (seq_idx, x) in r.genotypes().iter().enumerate() {
+            let g = x
+                .get(&Key::Genotype)
+                .ok_or(ReadVcfError::MissingGenotypeKey)?;
+
+            let value = match g.value() {
+                Some(Value::String(s)) => s,
+                _ => return Err(ReadVcfError::NonStringGenotype),
+            }.as_bytes();
+            
+            let strand_0 = match value[0] {
+                b'0' => MajMin::Major,
+                other if other.is_ascii_digit() => MajMin::Minor,
+                other => {
+                    error!("Unrecognized characted for strand 1: \"{}\"", other as char);
+                    return Err(ReadVcfError::BadFile);
+                }
+            };
+            
+            if value[1] != b'|' {
+                error!("Expected separator");
+                return Err(ReadVcfError::BadFile);
+            }
+            
+            let strand_1 = match value[2] {
+                b'0' => MajMin::Major,
+                other if other.is_ascii_digit() => MajMin::Minor,
+                other => {
+                    error!("Unrecognized characted for strand 2: \"{}\"", other as char);
+                    return Err(ReadVcfError::BadFile);
+                }
+            };
+            
+            buff_slice[seq_idx] = strand_0;
+            buff_slice[seq_idx + n_seqs] = strand_1;
+        }
+    }
+    
+    assert!(n_sites == site_map.len());
+    assert!(buffer.len() == n_sites * n_seqs.unwrap_or(0));
+    
+    Ok(SiteSet {
+        n_sites,
+        n_seqs: n_seqs.unwrap_or(0),
+        buffer,
+        site_map,
+    })
 }
 
 /// Given a slice of all symbols in a site, should the site be considered for LD computations

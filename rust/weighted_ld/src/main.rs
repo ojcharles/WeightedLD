@@ -1,7 +1,8 @@
 use human_format::Formatter;
 use indicatif::{ProgressBar, ProgressStyle};
-use log::{debug, info, log_enabled, Level};
+use log::{debug, error, info, log_enabled, Level};
 use std::{
+    ffi::OsStr,
     fs::File,
     io::{BufWriter, Write},
     path::PathBuf,
@@ -18,7 +19,7 @@ use weighted_ld::*;
 )]
 struct Opt {
     #[structopt(long, help = "The source file to load")]
-    fasta_input: PathBuf,
+    input: PathBuf,
 
     #[structopt(
         long,
@@ -92,12 +93,12 @@ fn write_pair_stats(path: &PathBuf, pairs: &PairStore<LdStats>) -> Result<(), st
 
     let mut written = 0u64;
 
-    writeln!(w, "site_a\tsite_b\td\td'\tr2")?;
+    writeln!(w, "position_a\tstrand_a\tposition_b\tstrand_b\td\td'\tr2")?;
 
     for (first_idx, second_idx, ld_stat) in pairs.iter() {
         writeln!(
             w,
-            "{}:{}\t{}:{}\t{:.3}\t{:.3}\t{:.3}",
+            "{}\t{}\t{}\t{}\t{:.3}\t{:.3}\t{:.3}",
             first_idx.index, first_idx.strand, second_idx.index, second_idx.strand, ld_stat.d, ld_stat.d_prime, ld_stat.r2
         )?;
 
@@ -112,12 +113,37 @@ fn write_pair_stats(path: &PathBuf, pairs: &PairStore<LdStats>) -> Result<(), st
     Ok(())
 }
 
+#[derive(Debug)]
+enum Error {
+    Io(std::io::Error),
+    ReadVcfError(ReadVcfError),
+    Other(&'static str),
+}
+
+impl From<ReadVcfError> for Error {
+    fn from(v: ReadVcfError) -> Self {
+        Self::ReadVcfError(v)
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(v: std::io::Error) -> Self {
+        Self::Io(v)
+    }
+}
+
+impl From<&'static str> for Error {
+    fn from(v: &'static str) -> Self {
+        Self::Other(v)
+    }
+}
+
 struct PreparedData {
     siteset: SiteSet<MajMin>,
     weights: Vec<f32>,
 }
 
-fn read_and_prepare_fasta(path: &PathBuf, options: &Opt) -> Result<PreparedData, std::io::Error> {
+fn read_and_prepare_fasta(path: &PathBuf, options: &Opt) -> Result<PreparedData, Error> {
     let sw = Instant::now();
     let multiseq = read_fasta(path)?;
     let siteset = SiteSet::from_multiseq(&multiseq);
@@ -155,14 +181,50 @@ fn read_and_prepare_fasta(path: &PathBuf, options: &Opt) -> Result<PreparedData,
     })
 }
 
-fn main() -> Result<(), std::io::Error> {
+fn read_and_prepare_vcf(path: &PathBuf, options: &Opt) -> Result<PreparedData, Error> {
+    let sw = Instant::now();
+    let siteset = read_vcf(path)?;
+    info!("Loaded VCF file in {:?}", sw.elapsed());
+    info!(
+        "    {} sequences, {} sites",
+        siteset.n_seqs(),
+        siteset.n_sites(),
+    );
+    
+    let weights = if options.unweighted {
+        vec![1f32; siteset.n_seqs()]
+    } else {
+        let sw = Instant::now();
+        let weights = henikoff_weights(&siteset);
+        info!("Computed Henikoff weights in {:?}", sw.elapsed());
+        weights
+    };
+
+    Ok(PreparedData {
+        siteset,
+        weights,
+    })
+}
+
+fn main() -> Result<(), Error> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let opt = Opt::from_args();
 
     debug!("{:?}", opt);
 
-    let data = read_and_prepare_fasta(&opt.fasta_input, &opt)?;
+    let data = match opt.input.extension().and_then(OsStr::to_str) {
+        Some("fasta") => read_and_prepare_fasta(&opt.input, &opt)?,
+        Some("vcf") => read_and_prepare_vcf(&opt.input, &opt)?,
+        Some(other) => {
+            error!("Don't know how to deal with file extension \"{}\"", other);
+            return Err(Error::Other("Bad file format"))
+        },
+        None => {
+            error!("Don't know how to deal with files without extensions");
+            return Err(Error::Other("Bad file format"))
+        },
+    };
 
     if let Some(weights_filepath) = opt.weights_output {
         info!("Writing weights to {:?}", weights_filepath);
