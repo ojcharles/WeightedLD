@@ -60,10 +60,7 @@ struct Opt {
     )]
     pair_output: PathBuf,
 
-    #[structopt(
-        long,
-        help = "Use unit weights instead of Henikoff weights"
-    )]
+    #[structopt(long, help = "Use unit weights instead of Henikoff weights")]
     unweighted: bool,
 }
 
@@ -79,10 +76,7 @@ fn write_weights(path: &PathBuf, weights: &[f32]) -> Result<(), std::io::Error> 
     Ok(())
 }
 
-fn write_pair_stats(
-    path: &PathBuf,
-    pairs: &PairStore<LdStats>,
-) -> Result<(), std::io::Error> {
+fn write_pair_stats(path: &PathBuf, pairs: &PairStore<LdStats>) -> Result<(), std::io::Error> {
     let file = File::create(path)?;
     let mut w = BufWriter::new(file);
 
@@ -138,8 +132,8 @@ fn read_and_prepare_fasta(path: &PathBuf, options: &Opt) -> Result<PreparedData,
     let min_acgt = options.min_acgt;
     let min_minor = options.min_minor;
     let max_minor = options.max_minor;
-    let filtered_siteset = siteset
-            .filter_by(|s| is_site_of_interest(s, min_acgt, min_minor, max_minor));
+    let filtered_siteset =
+        siteset.filter_by(|s| is_site_of_interest(s, min_acgt, min_minor, max_minor));
     info!(
         "Computed + filtered sites of interest in {:?}",
         sw.elapsed()
@@ -154,7 +148,7 @@ fn read_and_prepare_fasta(path: &PathBuf, options: &Opt) -> Result<PreparedData,
         info!("Computed Henikoff weights in {:?}", sw.elapsed());
         weights
     };
-    
+
     Ok(PreparedData {
         siteset: filtered_siteset.to_maj_min(),
         weights,
@@ -189,16 +183,11 @@ fn main() -> Result<(), std::io::Error> {
             None
         };
 
-        all_weighted_ld_pairs(
-            &data.siteset,
-            &data.weights,
-            opt.r2_threshold,
-            |computed| {
-                if let Some(pb) = &pb {
-                    pb.set_position(computed as u64);
-                }
-            },
-        )
+        all_weighted_ld_pairs(&data.siteset, &data.weights, opt.r2_threshold, |computed| {
+            if let Some(pb) = &pb {
+                pb.set_position(computed as u64);
+            }
+        })
     };
     let pair_calc_duration = sw.elapsed();
     info!(
@@ -207,13 +196,11 @@ fn main() -> Result<(), std::io::Error> {
     );
     info!(
         "    {} pairs computed at ~{}, {} passed threshold",
-        Formatter::new()
-            .format(total_pairs as f64),
+        Formatter::new().format(total_pairs as f64),
         Formatter::new()
             .with_units("pairs/s")
             .format(total_pairs as f64 / pair_calc_duration.as_secs_f64()),
-        Formatter::new()
-            .format(pair_store.len() as f64),
+        Formatter::new().format(pair_store.len() as f64),
     );
 
     info!("Writing output to {:?}", opt.pair_output);
