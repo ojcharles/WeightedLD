@@ -1,28 +1,20 @@
 
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use rand::prelude::*;
-use num_traits::FromPrimitive;
 
 use weighted_ld::*;
 
-fn make_sequence(len: usize, missing_frac: f32, major_frac: f32) -> Vec<Symbol> {
+fn make_sequence(len: usize, missing_frac: f32, major_frac: f32) -> Vec<MajMin> {
     let mut r = thread_rng();
-    
-    let major_sym: Symbol = Symbol::from_u8(r.gen_range(0..4)).unwrap();
-    let mut minor_sym: Symbol;
-    loop {
-        minor_sym = Symbol::from_u8(r.gen_range(0..4)).unwrap();
-        if minor_sym != major_sym { break }
-    }
     
     (0..len).map(|_| {
         let num = r.gen_range(0f32..1f32);
         if num < missing_frac {
-            Symbol::Missing
+            MajMin::Other
         } else if num < (missing_frac + major_frac) {
-            major_sym
+            MajMin::Major
         } else {
-            minor_sym
+            MajMin::Minor
         }
     }).collect()
 }

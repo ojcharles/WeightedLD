@@ -51,6 +51,15 @@ impl From<char> for Symbol {
             _ => Self::Unknown,
         }
     }
+
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, FromPrimitive)]
+#[repr(u8)]
+pub enum MajMin {
+    Major = 0,
+    Minor,
+    Other,
 }
 
 pub struct SymbolHistogram<T: num::Integer> {
@@ -123,11 +132,11 @@ pub struct MultiSequence {
 }
 
 /// Stores symbol data such that all data for a given site is contiguous
-pub struct SiteSet {
+pub struct SiteSet<T> {
     n_sites: usize,
     n_seqs: usize,
 
-    buffer: Vec<Symbol>,
+    buffer: Vec<T>,
 
     /// Vector of length n_sites, mapping a site index in this set to some other index
     ///
@@ -136,8 +145,8 @@ pub struct SiteSet {
     site_map: Option<Vec<usize>>,
 }
 
-impl Index<usize> for SiteSet {
-    type Output = [Symbol];
+impl<T> Index<usize> for SiteSet<T> {
+    type Output = [T];
 
     fn index(&self, index: usize) -> &Self::Output {
         let start = index * self.n_seqs;
@@ -145,33 +154,8 @@ impl Index<usize> for SiteSet {
     }
 }
 
-impl SiteSet {
-    pub fn from_multiseq(ms: &MultiSequence) -> Self {
-        let n_seqs = ms.sequences.len();
-        let n_sites = ms.sequences[0].symbols.len();
-
-        if ms.sequences.iter().any(|s| s.symbols.len() != n_sites) {
-            panic!("Not all sequences have the same number of symbols");
-        }
-
-        let buffer_len = n_seqs * n_sites;
-        let mut buffer = vec![Symbol::Missing; buffer_len];
-
-        for site in 0..n_sites {
-            for seq in 0..n_seqs {
-                buffer[site * n_seqs + seq] = ms.sequences[seq].symbols[site];
-            }
-        }
-
-        Self {
-            n_sites,
-            n_seqs,
-            buffer,
-            site_map: None,
-        }
-    }
-
-    pub fn filter_by(&self, filter_func: impl Fn(&[Symbol]) -> bool) -> Self {
+impl<T: Clone> SiteSet<T> {
+    pub fn filter_by(&self, filter_func: impl Fn(&[T]) -> bool) -> Self {
         let mut new_buffer = Vec::with_capacity(self.buffer.len());
         let mut site_map = Vec::new();
 
@@ -203,6 +187,59 @@ impl SiteSet {
 
     pub fn parent_site_index(&self, idx: usize) -> usize {
         self.site_map.as_ref().map(|m| m[idx]).unwrap_or(idx)
+    }
+}
+
+impl SiteSet<Symbol> {
+    pub fn from_multiseq(ms: &MultiSequence) -> SiteSet<Symbol> {
+        let n_seqs = ms.sequences.len();
+        let n_sites = ms.sequences[0].symbols.len();
+
+        if ms.sequences.iter().any(|s| s.symbols.len() != n_sites) {
+            panic!("Not all sequences have the same number of symbols");
+        }
+
+        let buffer_len = n_seqs * n_sites;
+        let mut buffer = vec![Symbol::Missing; buffer_len];
+
+        for site in 0..n_sites {
+            for seq in 0..n_seqs {
+                buffer[site * n_seqs + seq] = ms.sequences[seq].symbols[site];
+            }
+        }
+
+        Self {
+            n_sites,
+            n_seqs,
+            buffer,
+            site_map: None,
+        }
+    }
+
+    pub fn to_maj_min(&self) -> SiteSet<MajMin> {
+        let mut new_buffer = vec![MajMin::Other; self.buffer.len()];
+        for site in 0..self.n_sites() {
+            let hist = SymbolHistogram::<u32>::from_slice(&self[site]);
+            let (maj, min) = match hist.major_minor_symbols() {
+                (Some(maj), Some(min)) => (maj, min),
+                _ => continue,
+            };
+            
+            for seq in 0..self.n_seqs() {
+                new_buffer[site * self.n_seqs() + seq] = match self[site][seq] {
+                    x if x == maj => MajMin::Major,
+                    x if x == min => MajMin::Minor,
+                    _ => MajMin::Other,
+                };
+            }
+        }
+        
+        SiteSet {
+            n_sites: self.n_sites(),
+            n_seqs: self.n_seqs(),
+            buffer: new_buffer,
+            site_map: self.site_map.clone(),
+        }
     }
 }
 
@@ -269,7 +306,7 @@ pub fn is_site_of_interest(site: &[Symbol], min_acgt: u32, min_minor: f32, max_m
     }
 }
 
-pub fn henikoff_weights(data: &SiteSet) -> Vec<f32> {
+pub fn henikoff_weights(data: &SiteSet<Symbol>) -> Vec<f32> {
     let mut contributions = Array2::<f32>::zeros((data.n_sites(), data.n_seqs()));
 
     for site in 0..data.n_sites() {
@@ -319,29 +356,14 @@ pub struct LdStats {
 }
 
 #[allow(non_snake_case)]
-pub fn single_weighted_ld_pair(a: &[Symbol], b: &[Symbol], weights: &[f32]) -> Option<LdStats> {
+pub fn single_weighted_ld_pair(a: &[MajMin], b: &[MajMin], weights: &[f32]) -> Option<LdStats> {
     debug_assert_eq!(a.len(), b.len());
     debug_assert_eq!(a.len(), weights.len());
-
-    // TODO: It is wasteful to compute these histograms for every pair - should
-    // lift their computations outside the pairwise loop.
-    let a_hist = SymbolHistogram::<u32>::from_slice(a);
-    let b_hist = SymbolHistogram::<u32>::from_slice(b);
-
-    let (a_maj_sym, a_min_sym) = match a_hist.major_minor_symbols() {
-        (Some(maj), Some(min)) => (maj, min),
-        _ => return None,
-    };
-
-    let (b_maj_sym, b_min_sym) = match b_hist.major_minor_symbols() {
-        (Some(maj), Some(min)) => (maj, min),
-        _ => return None,
-    };
 
     let good_mask = a
         .iter()
         .zip(b.iter())
-        .map(|(&a, &b)| (a == a_maj_sym || a == a_min_sym) && (b == b_maj_sym || b == b_min_sym))
+        .map(|(&a, &b)| a != MajMin::Other && b != MajMin::Other)
         .collect::<Vec<bool>>();
 
     let mut PA = 0f32;
@@ -355,7 +377,7 @@ pub fn single_weighted_ld_pair(a: &[Symbol], b: &[Symbol], weights: &[f32]) -> O
             continue;
         }
 
-        if a[seq] == a_maj_sym {
+        if a[seq] == MajMin::Major {
             PA += weights[seq];
         } else {
             // good_mask has already filtered down the sequences to ones where
@@ -364,13 +386,13 @@ pub fn single_weighted_ld_pair(a: &[Symbol], b: &[Symbol], weights: &[f32]) -> O
             Pa += weights[seq];
         }
 
-        if b[seq] == b_maj_sym {
+        if b[seq] == MajMin::Major {
             PB += weights[seq];
         } else {
             Pb += weights[seq];
         }
 
-        match (a[seq] == a_maj_sym, b[seq] == b_maj_sym) {
+        match (a[seq] == MajMin::Major, b[seq] == MajMin::Major) {
             (false, false) => ld_obs[0] += weights[seq],
             (true, true) => ld_obs[3] += weights[seq],
             (false, true) => ld_obs[1] += weights[seq],
@@ -477,7 +499,7 @@ impl<'a, T> Iterator for PairStoreIter<'a, T> {
 }
 
 pub fn all_weighted_ld_pairs(
-    site_set: &SiteSet,
+    site_set: &SiteSet<MajMin>,
     weights: &[f32],
     r2_threshold: f32,
     mut progress_report: impl FnMut(usize) + Send,

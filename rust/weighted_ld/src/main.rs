@@ -139,8 +139,8 @@ fn main() -> Result<(), std::io::Error> {
     let min_acgt = (opt.min_acgt * siteset.n_seqs() as f32).ceil() as u32;
     let min_minor = opt.min_minor;
     let max_minor = opt.max_minor;
-    let filtered_siteset =
-        siteset.filter_by(|s| is_site_of_interest(s, min_acgt, min_minor, max_minor));
+    let filtered_siteset = siteset
+            .filter_by(|s| is_site_of_interest(s, min_acgt, min_minor, max_minor));
     info!(
         "Computed + filtered sites of interest in {:?}",
         sw.elapsed()
@@ -178,7 +178,7 @@ fn main() -> Result<(), std::io::Error> {
         };
 
         all_weighted_ld_pairs(
-            &filtered_siteset,
+            &filtered_siteset.to_maj_min(),
             &weights,
             opt.r2_threshold,
             |computed| {
