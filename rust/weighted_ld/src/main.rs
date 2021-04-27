@@ -97,8 +97,8 @@ fn write_pair_stats(path: &PathBuf, pairs: &PairStore<LdStats>) -> Result<(), st
     for (first_idx, second_idx, ld_stat) in pairs.iter() {
         writeln!(
             w,
-            "{}\t{}\t{:.3}\t{:.3}\t{:.3}",
-            first_idx, second_idx, ld_stat.d, ld_stat.d_prime, ld_stat.r2
+            "{}:{}\t{}:{}\t{:.3}\t{:.3}\t{:.3}",
+            first_idx.index, first_idx.strand, second_idx.index, second_idx.strand, ld_stat.d, ld_stat.d_prime, ld_stat.r2
         )?;
 
         written += 1;

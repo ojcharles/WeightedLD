@@ -161,6 +161,12 @@ pub struct MultiSequence {
     pub sequences: Vec<Sequence>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SiteIndex {
+    pub index: usize,
+    pub strand: usize,
+}
+
 /// Stores symbol data such that all data for a given site is contiguous
 pub struct SiteSet<T> {
     n_sites: usize,
@@ -170,9 +176,8 @@ pub struct SiteSet<T> {
 
     /// Vector of length n_sites, mapping a site index in this set to some other index
     ///
-    /// Used when this SiteSet is only a subset of the total number of sites.
-    /// The site with index N in this set has an index `site_map[N]` in the parent set
-    site_map: Option<Vec<usize>>,
+    /// The site with index N in this set has an index `site_map[N]`
+    site_map: Vec<SiteIndex>,
 }
 
 impl<T> Index<usize> for SiteSet<T> {
@@ -192,7 +197,7 @@ impl<T: Clone> SiteSet<T> {
         for site in 0..self.n_sites {
             let site_slice = &self[site];
             if filter_func(site_slice) {
-                site_map.push(site);
+                site_map.push(self.site_map[site]);
                 new_buffer.extend_from_slice(site_slice);
             }
         }
@@ -201,7 +206,7 @@ impl<T: Clone> SiteSet<T> {
             n_sites: site_map.len(),
             n_seqs: self.n_seqs,
             buffer: new_buffer,
-            site_map: Some(site_map),
+            site_map: site_map,
         }
     }
 
@@ -215,8 +220,8 @@ impl<T: Clone> SiteSet<T> {
         self.n_seqs
     }
 
-    pub fn parent_site_index(&self, idx: usize) -> usize {
-        self.site_map.as_ref().map(|m| m[idx]).unwrap_or(idx)
+    pub fn site_index(&self, idx: usize) -> SiteIndex {
+        self.site_map[idx]
     }
 }
 
@@ -237,12 +242,16 @@ impl SiteSet<Symbol> {
                 buffer[site * n_seqs + seq] = ms.sequences[seq].symbols[site];
             }
         }
+        
+        let site_map = (0..n_sites)
+            .map(|x| SiteIndex { index: x, strand: 0 })
+            .collect();
 
         Self {
             n_sites,
             n_seqs,
             buffer,
-            site_map: None,
+            site_map,
         }
     }
 
@@ -508,8 +517,8 @@ pub fn single_weighted_ld_pair(a: &[MajMin], b: &[MajMin], weights: &[f32]) -> O
 }
 
 struct PairData<T> {
-    first_idx: usize,
-    second_idx: usize,
+    first_idx: SiteIndex,
+    second_idx: SiteIndex,
     data: T,
 }
 
@@ -542,7 +551,7 @@ pub struct PairStoreIter<'a, T> {
 }
 
 impl<'a, T> Iterator for PairStoreIter<'a, T> {
-    type Item = (usize, usize, &'a T);
+    type Item = (SiteIndex, SiteIndex, &'a T);
 
     fn next(&mut self) -> Option<Self::Item> {
         let ret = if self.chunk_idx < self.store.chunks.len() {
@@ -583,8 +592,8 @@ pub fn all_weighted_ld_pairs(
                 if let Some(ld_stat) = single_weighted_ld_pair(a, b, weights) {
                     if ld_stat.r2 > r2_threshold {
                         results_chunk.push(PairData {
-                            first_idx: siteset.parent_site_index(first_idx),
-                            second_idx: siteset.parent_site_index(second_idx),
+                            first_idx: siteset.site_index(first_idx),
+                            second_idx: siteset.site_index(second_idx),
                             data: ld_stat,
                         });
                     }
