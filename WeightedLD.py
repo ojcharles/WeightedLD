@@ -177,7 +177,6 @@ def ld(alignment, weights, site_map):
         for second_site in range(first_site + 1, n_sites):
             # Form an array which contains all the sequences, but only the two target sites
             target_sites = alignment[:, (first_site, second_site)]
-
             # Remove all sequences with a bad symbol at either target site
             good_sequences = (target_sites < 5).all(axis=1)
             target_sites = target_sites[good_sequences, :]
@@ -188,8 +187,6 @@ def ld(alignment, weights, site_map):
             # Whether the given sequence is equal to the major symbol at the given site
             target_sites_major = np.zeros_like(target_sites, dtype=np.bool8)
             target_sites_domMinor = np.zeros_like(target_sites, dtype=np.bool8)
-
-            # astype np.bool8
 
             skip_site = False
             for site in (0, 1):
@@ -219,10 +216,9 @@ def ld(alignment, weights, site_map):
             keep_second = target_sites_major[:,
                                              1] + target_sites_domMinor[:, 1]
             keep = np.array([keep_first, keep_second]).all(axis=0)
-
             # filter again
             target_sites = target_sites[keep, :]
-            target_weights = weights[keep]
+            target_weights = target_weights[keep]
             target_sites_major = target_sites_major[keep, ]
             target_seqs = target_sites.shape[0]
 
@@ -231,6 +227,12 @@ def ld(alignment, weights, site_map):
                 2, axis=1), ~target_sites_major).sum(axis=0) / total_weight
             Pa, Pb = np.ma.masked_array(target_weights.reshape(-1, 1).repeat(
                 2, axis=1), target_sites_major).sum(axis=0) / total_weight
+
+            # after removing sequences which not Maj or dMin in both sites, we may want to skip site
+            if round(PA, 1) == 1.0:
+                continue
+            if round(PB, 1) == 1.0:
+                continue
 
             # ----- predicted allele freqs if 0 LD
             PAB = PA * PB
@@ -295,17 +297,15 @@ def main(args):
         alignment, args.min_acgt, args.min_variability)
     logging.info("Found %s sites of interest", var_sites_LD.sum())
 
-    logging.info("Computing Henikoff weights for each sequence")
-
     # default behaviour is Henikoff weighting, can be disabled
     if args.unweighted:
-        print("unweighted")
+        logging.info("Unweighted")
         weights = np.zeros(alignment.shape[0], dtype=np.uint16)
         weights[weights == 0] = 1
     else:
-        print("Henikoff")
+        logging.info("Computing Henikoff weights for each sequence")
         weights = henikoff_weighting(alignment[:, var_sites_HK])
-        print(weights)
+        # todo print weights to file
 
     # Trim down the alignment array to only include the sites of interest
     alignment = alignment[:, var_sites_LD]
