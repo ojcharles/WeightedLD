@@ -6,11 +6,10 @@ todo
 code/
 build/
 rust/weighted_ld/target/
+temp
 
-# we will load the paper stats and maybe an R/py notebook along with the paper, but ignore for now
+# dirs for paper
 paper/
-
-# R - sorry for my sins
 *.R
 .RHistory
 .RData

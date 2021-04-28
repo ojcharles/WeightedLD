@@ -106,42 +106,40 @@ class TestStuff(unittest.TestCase):
         # capture stdout
         capturedOutput = io.StringIO()          # Create io object
         sys.stdout = capturedOutput             # to which we redirect stdout.
-
         wld.ld(alignment, weightsHK, site_map)  # run function as normal
-
         sys.stdout = sys.__stdout__             # Reset redirect.
 
         self.assertEqual(capturedOutput.getvalue()[22:27], "-0.25")     # D
         self.assertEqual(capturedOutput.getvalue()[32:33], "1")         # r2
 
-    def test_ld_considers_only_Major_donMinor(self):
+    def test_ld_complex(self):
         # flat weights, total LD, simple example
         min_acgt = 0.8
         min_variability = 0.02
-        #file = "tests/t7_henikoff_paper_ld.fasta"
-        file = "tests/t1_henikoff_paper.fasta"
+        file = "tests/t3_henikoff_complex2.fasta"
         alignment = wld.read_fasta(file)
-        # print(alignment)
         var_sites_HK, var_sites_LD = wld.compute_variable_sites(
             alignment, min_acgt, min_variability)
-        # print(var_sites_LD)
         weightsHK = wld.henikoff_weighting(alignment[:, var_sites_HK])
-        # weightsHK = np.array([1, 1, 1, 1, 1, 1])
         alignment = alignment[:, var_sites_LD]
         site_map = np.where(var_sites_LD)[0]
 
         # capture stdout
         capturedOutput = io.StringIO()          # Create io object
         sys.stdout = capturedOutput             # to which we redirect stdout.
-
         wld.ld(alignment, weightsHK, site_map)  # run function as normal
-
         sys.stdout = sys.__stdout__             # Reset redirect.
-        print(capturedOutput.getvalue())
-        #self.assertEqual(capturedOutput.getvalue()[32:33], "1")
+
+        # handle character output to something structured
+        outTable = re.split(r'\n+', capturedOutput.getvalue())
+        outTable = [x.split("\t") for x in outTable]
+        t = [el[4] for el in outTable[1:7]]
+        t = np.array(t, dtype=float)
+        self.assertTrue(np.allclose(np.array(t),
+                                    np.array(
+                                        ['0.0912', '0.0945', '0.0945', '0.1657', '0.1657', '1.0'], dtype=float)
+                                    ))
 
 
-"""
-"""
 if __name__ == '__main__':
     unittest.main()
