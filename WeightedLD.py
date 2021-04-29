@@ -7,6 +7,8 @@ import argparse
 from pathlib import Path
 from Bio import AlignIO
 import numpy as np
+import sys
+import re
 
 
 logging.basicConfig(
@@ -282,10 +284,10 @@ def ld(alignment, weights, site_map):
                 f"{site_map[first_site]}\t{site_map[second_site]}\t{round(D, 4)}\t{round(DPrime, 4)}\t{round(R2, 4)}")
 
 
-def main(args):
-    logging.info("Reading FASTA data from %s", args.fasta_input)
+def handle_fasta(args):
+    logging.info("Reading FASTA data from %s", args.file)
     # convert fasta character alignment to integer matrix
-    alignment = read_fasta(args.fasta_input)
+    alignment = read_fasta(args.file)
     logging.info(
         "Finished reading data. Sequence count: %s, Sequence length %s", *alignment.shape)
 
@@ -297,29 +299,104 @@ def main(args):
         alignment, args.min_acgt, args.min_variability)
     logging.info("Found %s sites of interest", var_sites_LD.sum())
 
-    # default behaviour is Henikoff weighting, can be disabled
-    if args.unweighted:
-        logging.info("Unweighted")
-        weights = np.zeros(alignment.shape[0], dtype=np.uint16)
-        weights[weights == 0] = 1
-    else:
-        logging.info("Computing Henikoff weights for each sequence")
-        weights = henikoff_weighting(alignment[:, var_sites_HK])
-        # todo print weights to file
-
     # Trim down the alignment array to only include the sites of interest
     alignment = alignment[:, var_sites_LD]
 
     # Maps site indices in the trimmed down array to site indices in the original alignment
     site_map = np.where(var_sites_LD)[0]
 
+    return alignment, site_map
+
+
+def handle_vcf(filename):
+    # extract lines -> list
+    logging.info("Reading VCF data from %s", filename)
+    with open(filename, 'r') as f:
+        data = f.read().split("\n")
+    endline = len(data)
+
+    # is there a header block? if yes return header line and data block
+    is_vcf = False
+    for i, line in enumerate(data):
+        if re.search("#CHROM", line):
+            is_vcf = True
+            header = data[i]
+            data = data[(i+1):endline]
+            break
+    if is_vcf == False:
+        print(
+            "No #CHROM header block identified")
+        sys.exit(1)
+
+    # is there enough dat to be meaningful?
+    line = data[0].split("\t")
+    if len(line) <= 12:
+        print(
+            "The VCF data contains too small a population, are you sure this is a multi VCF?")
+        sys.exit(1)
+
+    # is the data haploid or diploid?
+    if(type(re.search(r"[0-2]|[0-2]", data[0])) == "NoneType"):
+        # the vcf is haploid
+        vcf_type = "haploid"
+        print(
+            "Well this is awkward, we haven't implemented a haploid VCF reader yet")
+        sys.exit(1)
+    else:
+        vcf_type = "diploid"
+        # now split any diploid -> haploid
+        for i, line in enumerate(data):
+            t = line.replace("|||", "")
+            t = t.replace("||", "")
+            # if any diplod calls are unphased (i.e. we do not know haplotype) treat as missing.
+            t = re.sub(r"./.", ".|.", t)
+            t = t.replace("|", "\t")
+            t = t.split("\t")
+            del t[2:9]
+            del t[0]
+            data[i] = t
+
+    # we now have for each row the pos and haploid calls
+    # extract site_map - large numbers
+    site_map = np.array([item[0] for item in data], dtype=np.int64)
+
+    # force everything to uint8 - remove site_map col
+    alignment = np.array(data, dtype=np.uint8)
+    alignment = np.delete(alignment, 0, axis=1)
+    # so that its the same format as an alignment - for compatability with other functions
+    alignment = np.rot90(alignment)
+
+    logging.info(
+        "Finished reading data. Sequence count: %s, Sequence length %s", *alignment.shape)
+    return alignment, site_map
+
+
+def main(args):
+    filename = str(args.file)
+
+    if filename.endswith('.vcf'):
+        alignment, site_map = handle_vcf(filename)
+    else:
+        alignment, site_map = handle_fasta(args)
+
+    # default behaviour is Henikoff weighting, can be disabled
+    if args.unweighted:
+        logging.info("Unweighted")
+        weights = np.zeros(alignment.shape[0], dtype=np.uint8)
+        weights[weights == 0] = 1
+    else:
+        logging.info("Computing Henikoff weights for each sequence")
+        weights = henikoff_weighting(alignment)
+        # todo print weights to file
+
     logging.info("Computing the LD parameters")
+
     ld(alignment, weights, site_map)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WeightedLD computation tool")
-    parser.add_argument("--fasta-input", type=Path,
+    parser.add_argument("--file", type=Path,
                         help="The source file to load", required=True)
     parser.add_argument("--min-acgt", type=float, default=0.8,
                         help="Minimum fractions of ACTG at a given site for the site to be included in calculation.\
