@@ -140,6 +140,15 @@ class TestStuff(unittest.TestCase):
                                         ['0.0912', '0.0945', '0.0945', '0.1657', '0.1657', '1.0'], dtype=float)
                                     ))
 
+    def test_vcf(self):
+        # this code tests the whole pipeline with a vcf file, as in the 1000 genomes vcf v4.2
+        filename = "tests/t7_1000genome.vcf"
+        alignment, site_map = wld.handle_vcf(filename)
+        weights = wld.henikoff_weighting(alignment)
+        wld.ld(alignment, weights, site_map)
+
+        self.assertEqual(round(weights.mean(), 3), 0.002)
+
 
 if __name__ == '__main__':
     unittest.main()
