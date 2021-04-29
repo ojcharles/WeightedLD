@@ -149,6 +149,5 @@ class TestStuff(unittest.TestCase):
 
         self.assertEqual(round(weights.mean(), 3), 0.002)
 
-
 if __name__ == '__main__':
     unittest.main()
