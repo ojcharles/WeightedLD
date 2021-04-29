@@ -338,23 +338,31 @@ def handle_vcf(filename):
     # is the data haploid or diploid?
     if(type(re.search(r"[0-2]|[0-2]", data[0])) == "NoneType"):
         # the vcf is haploid
-        vcf_type = "haploid"
         print(
             "Well this is awkward, we haven't implemented a haploid VCF reader yet")
         sys.exit(1)
     else:
-        vcf_type = "diploid"
+
+        # the vcf is diploid
         # now split any diploid -> haploid
         for i, line in enumerate(data):
+            # remove | delimiters in extra cols
             t = line.replace("|||", "")
             t = t.replace("||", "")
+            t = re.sub(r"[^0-9]\|[^0-9]", "", t)
+            t = re.sub(r"[^0-9]\|[^0-9]", "", t)
             # if any diplod calls are unphased (i.e. we do not know haplotype) treat as missing.
             t = re.sub(r"./.", ".|.", t)
             t = t.replace("|", "\t")
+            # replace .  with proper missing flag
+            t = re.sub(r"\.{1}", "4", t)
+
             t = t.split("\t")
             del t[2:9]
             del t[0]
             data[i] = t
+
+        del data[len(data)-1]  # it is standard to leave the last line blank
 
     # we now have for each row the pos and haploid calls
     # extract site_map - large numbers
