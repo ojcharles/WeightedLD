@@ -5,9 +5,9 @@ use std::{
     ops::{Index, IndexMut},
     path::{Path, PathBuf},
     sync::{
-        Mutex,
         atomic::{AtomicUsize, Ordering},
-    }
+        Mutex,
+    },
 };
 
 use ndarray::prelude::*;
@@ -30,6 +30,13 @@ impl Symbol {
         match self {
             Symbol::A | Symbol::C | Symbol::G | Symbol::T => true,
             Symbol::Missing | Symbol::Unknown => false,
+        }
+    }
+
+    pub fn is_acgtm(&self) -> bool {
+        match self {
+            Symbol::A | Symbol::C | Symbol::G | Symbol::T | Symbol::Missing => true,
+            Symbol::Unknown => false,
         }
     }
 }
@@ -91,11 +98,16 @@ impl<T: num::Integer + Copy + Sum> SymbolHistogram<T> {
         self[A] + self[C] + self[G] + self[T]
     }
 
+    fn acgtm(&self) -> T {
+        use Symbol::*;
+        self[A] + self[C] + self[G] + self[T] + self[Missing]
+    }
+
     fn major_minor_symbols(&self) -> (Option<Symbol>, Option<Symbol>) {
         let mut major = None;
         let mut minor = None;
 
-        for sym in &[Symbol::A, Symbol::C, Symbol::G, Symbol::T] {
+        for sym in &[Symbol::A, Symbol::C, Symbol::G, Symbol::T, Symbol::Missing] {
             if self[*sym] > major.map(|m| self[m]).unwrap_or(T::zero()) {
                 minor = major;
                 major = Some(*sym);
@@ -171,21 +183,28 @@ impl SiteSet {
             site_map: None,
         }
     }
-    
+
     #[cfg(test)]
     pub fn from_strs(raw: &[&str]) -> Self {
         let sequences = raw
             .iter()
-            .map(|seq_str| seq_str
-                .chars()
-                .map(Symbol::from)
-                // .map(Option::unwrap)
-                .collect::<Vec<_>>()
-            )
-            .map(|symbols| Sequence { name: None, symbols })
+            .map(|seq_str| {
+                seq_str
+                    .chars()
+                    .map(Symbol::from)
+                    // .map(Option::unwrap)
+                    .collect::<Vec<_>>()
+            })
+            .map(|symbols| Sequence {
+                name: None,
+                symbols,
+            })
             .collect::<Vec<Sequence>>();
-            
-        Self::from_multiseq(&MultiSequence { source: MultiSequenceSource::None, sequences })
+
+        Self::from_multiseq(&MultiSequence {
+            source: MultiSequenceSource::None,
+            sequences,
+        })
     }
 
     pub fn filter_by(&self, filter_func: impl Fn(&[Symbol]) -> bool) -> Self {
@@ -269,7 +288,7 @@ pub fn is_site_of_interest(site: &[Symbol], min_acgt: u32, min_minor: f32, max_m
             (Some(maj), Some(min)) => (maj, min),
             _ => return false,
         };
-        
+
         let maj_count = hist[major_sym] as f32;
         let min_count = hist[minor_sym] as f32;
 
@@ -309,20 +328,20 @@ pub fn henikoff_weights(data: &SiteSet) -> Vec<f32> {
 pub fn henikoff_site_contributions(site: &[Symbol], contributions: &mut [f32]) {
     let hist = SymbolHistogram::<u32>::from_slice(site);
 
-    let acgt_count = hist.acgt() as f32;
+    let acgt_count = hist.acgtm() as f32; // todo  we want to include Missing as an equally valid symbol
     let mut total_site_contrib = 0f32;
 
     for (idx, sym) in site.iter().enumerate() {
-        if sym.is_acgt() {
+        if sym.is_acgtm() {
             contributions[idx] = 1f32 / (acgt_count * hist[*sym] as f32);
             total_site_contrib += contributions[idx];
         }
     }
 
-    let mean_site_contrib = total_site_contrib / acgt_count;
+    let mean_site_contrib = total_site_contrib / acgt_count; // todo  we want to include Missing as an equally valid symbol
 
     for (idx, sym) in site.iter().enumerate() {
-        if !sym.is_acgt() {
+        if !sym.is_acgtm() {
             contributions[idx] = mean_site_contrib;
         }
     }
@@ -358,10 +377,7 @@ pub fn single_weighted_ld_pair(a: &[Symbol], b: &[Symbol], weights: &[f32]) -> O
     let good_mask = a
         .iter()
         .zip(b.iter())
-        .map(|(&a, &b)| {
-            (a == a_maj_sym || a == a_min_sym) &&
-            (b == b_maj_sym || b == b_min_sym)
-        })
+        .map(|(&a, &b)| (a == a_maj_sym || a == a_min_sym) && (b == b_maj_sym || b == b_min_sym))
         .collect::<Vec<bool>>();
 
     let mut PA = 0f32;
@@ -429,9 +445,9 @@ pub fn single_weighted_ld_pair(a: &[Symbol], b: &[Symbol], weights: &[f32]) -> O
             denominator = (-ld_obs[0]).min(-ld_obs[3]);
         }
     } else {
-        denominator = (-ld_obs[1]).min(-ld_obs[2]);
+        denominator = (ld_obs[1]).min(ld_obs[2]);
         if denominator == 0f32 {
-            denominator = (-ld_obs[1]).max(-ld_obs[2]);
+            denominator = (ld_obs[1]).max(ld_obs[2]);
         }
     }
     let d_prime = d / denominator;
@@ -444,7 +460,7 @@ pub fn single_weighted_ld_pair(a: &[Symbol], b: &[Symbol], weights: &[f32]) -> O
 struct PairData<T> {
     first_idx: usize,
     second_idx: usize,
-    data: T
+    data: T,
 }
 
 pub struct PairStore<T> {
@@ -459,12 +475,9 @@ impl<T> PairStore<T> {
             pair_idx: 0,
         }
     }
-    
+
     pub fn len(&self) -> usize {
-        self.chunks
-            .iter()
-            .map(|c| c.len())
-            .sum()
+        self.chunks.iter().map(|c| c.len()).sum()
     }
 }
 
@@ -473,7 +486,7 @@ pub struct PairStoreIter<'a, T> {
 
     /// Index of the next chunk
     chunk_idx: usize,
-    
+
     /// Index of the next pair within the next chunk
     pair_idx: usize,
 }
@@ -488,7 +501,7 @@ impl<'a, T> Iterator for PairStoreIter<'a, T> {
         } else {
             return None;
         };
-        
+
         self.pair_idx += 1;
         if self.pair_idx >= self.store.chunks[self.chunk_idx].len() {
             self.pair_idx = 0;
@@ -498,7 +511,6 @@ impl<'a, T> Iterator for PairStoreIter<'a, T> {
         Some(ret)
     }
 }
-
 
 pub fn all_weighted_ld_pairs(
     site_set: &SiteSet,
@@ -511,7 +523,8 @@ pub fn all_weighted_ld_pairs(
     let computed_pair_count = AtomicUsize::new(0);
     let progress_report = Mutex::new(progress_report);
 
-    let data_chunks = (0..(site_set.n_sites() - 1)).into_par_iter()
+    let data_chunks = (0..(site_set.n_sites() - 1))
+        .into_par_iter()
         .map(|first_idx| {
             let a = &site_set[first_idx];
             let mut results_chunk = Vec::new();
@@ -527,17 +540,20 @@ pub fn all_weighted_ld_pairs(
                     }
                 }
             }
-            
-            let computed = computed_pair_count.fetch_add(site_set.n_sites() - first_idx - 1, Ordering::Relaxed);
-            (progress_report.lock().expect("Failed to get lock on progress indicator callback"))(computed);
-            
+
+            let computed = computed_pair_count
+                .fetch_add(site_set.n_sites() - first_idx - 1, Ordering::Relaxed);
+            (progress_report
+                .lock()
+                .expect("Failed to get lock on progress indicator callback"))(computed);
+
             results_chunk
         })
         .filter(|chunk| chunk.len() > 0)
         .collect::<Vec<Vec<PairData<LdStats>>>>();
-    
+
     PairStore {
-        chunks: data_chunks
+        chunks: data_chunks,
     }
 }
 
@@ -549,15 +565,16 @@ mod tests {
     #[test]
     fn test_histogram_from_slice() {
         use Symbol::*;
-        let a = [A, A, A, C, C, G, T, T, T, T];
+        let a = [A, A, A, C, C, G, T, T, T, T, Missing, Missing, Unknown];
         let hist = SymbolHistogram::<u8>::from_slice(&a);
 
         assert_eq!(hist[A], 3);
         assert_eq!(hist[C], 2);
         assert_eq!(hist[G], 1);
         assert_eq!(hist[T], 4);
+        assert_eq!(hist[Missing], 2);
+        assert_eq!(hist[Unknown], 1);
     }
-
     #[test]
     fn test_hist_major_minor() {
         use Symbol::*;
@@ -575,17 +592,59 @@ mod tests {
         let (maj, min) = hist.major_minor_symbols();
         assert_eq!(maj, Some(G));
         assert_eq!(min, Some(C));
+
+        let hist = SymbolHistogram {
+            data: [1, 1, 40, 2, 4, 0],
+        };
+        let (maj, min) = hist.major_minor_symbols();
+        assert_eq!(maj, Some(G));
+        assert_eq!(min, Some(Missing));
     }
-    
+
     #[test]
     fn test_henikoff_weights() {
-        let siteset = SiteSet::from_strs(&[
-            "ACGT",
-            "AAGT",
-            "AAAT",
-            "AAAA",
-        ]);
-        assert_ulps_eq!(henikoff_weights(&siteset)[..], [1.0, 0.68, 0.68, 1.0]);
+        // as in the Henikoff and henikoff 1994 paper
+        let siteset = SiteSet::from_strs(&["AAAAA", "AAAAA", "CCCCC", "CCCCC", "TTTTT"]);
+        assert_ulps_eq!(henikoff_weights(&siteset)[..], [0.5, 0.5, 0.5, 0.5, 1.0]);
+
+        // as in S.F. Altschul NIH
+        // let siteset2 = SiteSet::from_strs(&["GCGTTAGC", "GAGTTGGA", "CGGACTAA"]);
+        //assert_ulps_eq!(henikoff_weights(&siteset2)[..], [0.769, 0.692, 1.0]); // todo ever so slightly off
+
+        // ensure that indels are treated equally - seq 2 is most unique
+        // 0.9166 , 1.25, 0.9166, 0.9166 -> 0.7333, 1, 0.7333, 0.7333
+        // let siteset3 = SiteSet::from_strs(&["AAGA", "AA-A", "GGGG", "GGGG"]);
+        //assert_ulps_eq!(henikoff_weights(&siteset3)[..], [0.733, 1.0, 0.733, 0.733],max_ulps = 2); // todo handle insertions as real characters
+    }
+
+    #[test]
+    fn test_ld_pair_unweighted_ld0() {
+        use Symbol::*;
+        let a = [A, A, A, A, T, T, T, T ];
+        let b = [T, T, A, A, A, A, T, T ];
+        let weights = [1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0];
+
+        let ld_stats = single_weighted_ld_pair(&a, &b, &weights)
+            .expect("Expected test case to have LD statistics available");
+
+        assert_abs_diff_eq!(ld_stats.d, 0.0, epsilon = 1e-5);
+        assert_abs_diff_eq!(ld_stats.d_prime, 0.0, epsilon = 1e-5);
+        assert_abs_diff_eq!(ld_stats.r2, 0.0, epsilon = 1e-5);
+    }
+
+    #[test]
+    fn test_ld_pair_unweighted_ld1() {
+        use Symbol::*;
+        let a = [A, A, A, A, T, T, T, T ];
+        let b = [T, T, T, T, A, A, A, A ];
+        let weights = [1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0];
+
+        let ld_stats = single_weighted_ld_pair(&a, &b, &weights)
+            .expect("Expected test case to have LD statistics available");
+        println!("{}",&ld_stats.d);
+        assert_abs_diff_eq!(ld_stats.d, 0.25, epsilon = 1e-5);
+        assert_abs_diff_eq!(ld_stats.d_prime, 0.5, epsilon = 1e-5); //D prime should always be between 0 and 1.
+        assert_abs_diff_eq!(ld_stats.r2, 1.0, epsilon = 1e-5);
     }
 
     #[test]
@@ -599,7 +658,7 @@ mod tests {
             .expect("Expected test case to have LD statistics available");
 
         assert_abs_diff_eq!(ld_stats.d, 0.00308, epsilon = 1e-5);
-        assert_abs_diff_eq!(ld_stats.d_prime, -0.05555, epsilon = 1e-5);
+        assert_abs_diff_eq!(ld_stats.d_prime, 0.05555, epsilon = 1e-5);
         assert_abs_diff_eq!(ld_stats.r2, 0.00346, epsilon = 1e-5);
     }
 }
