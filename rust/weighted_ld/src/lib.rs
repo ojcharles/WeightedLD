@@ -328,17 +328,17 @@ pub fn henikoff_weights(data: &SiteSet) -> Vec<f32> {
 pub fn henikoff_site_contributions(site: &[Symbol], contributions: &mut [f32]) {
     let hist = SymbolHistogram::<u32>::from_slice(site);
 
-    let acgt_count = hist.acgtm() as f32; // todo  we want to include Missing as an equally valid symbol
+    let acgtm_count = hist.acgtm() as f32;
     let mut total_site_contrib = 0f32;
 
     for (idx, sym) in site.iter().enumerate() {
         if sym.is_acgtm() {
-            contributions[idx] = 1f32 / (acgt_count * hist[*sym] as f32);
+            contributions[idx] = 1f32 / (acgtm_count * hist[*sym] as f32);
             total_site_contrib += contributions[idx];
         }
     }
 
-    let mean_site_contrib = total_site_contrib / acgt_count; // todo  we want to include Missing as an equally valid symbol
+    let mean_site_contrib = total_site_contrib / acgtm_count;
 
     for (idx, sym) in site.iter().enumerate() {
         if !sym.is_acgtm() {
@@ -609,12 +609,12 @@ mod tests {
 
         // as in S.F. Altschul NIH
         // let siteset2 = SiteSet::from_strs(&["GCGTTAGC", "GAGTTGGA", "CGGACTAA"]);
-        //assert_ulps_eq!(henikoff_weights(&siteset2)[..], [0.769, 0.692, 1.0]); // todo ever so slightly off
+        //assert_ulps_eq!(henikoff_weights(&siteset2)[..], [0.769, 0.692, 1.0]); // todo ever so slightly off could be float point error
 
         // ensure that indels are treated equally - seq 2 is most unique
         // 0.9166 , 1.25, 0.9166, 0.9166 -> 0.7333, 1, 0.7333, 0.7333
         // let siteset3 = SiteSet::from_strs(&["AAGA", "AA-A", "GGGG", "GGGG"]);
-        //assert_ulps_eq!(henikoff_weights(&siteset3)[..], [0.733, 1.0, 0.733, 0.733],max_ulps = 2); // todo handle insertions as real characters
+        //assert_ulps_eq!(henikoff_weights(&siteset3)[..], [0.733, 1.0, 0.733, 0.733],max_ulps = 2); // todo handle assert nearly equal
     }
 
     #[test]
@@ -643,12 +643,12 @@ mod tests {
             .expect("Expected test case to have LD statistics available");
         println!("{}",&ld_stats.d);
         assert_abs_diff_eq!(ld_stats.d, 0.25, epsilon = 1e-5);
-        assert_abs_diff_eq!(ld_stats.d_prime, 0.5, epsilon = 1e-5); //D prime should always be between 0 and 1.
+        assert_abs_diff_eq!(ld_stats.d_prime, 0.5, epsilon = 1e-5);
         assert_abs_diff_eq!(ld_stats.r2, 1.0, epsilon = 1e-5);
     }
 
     #[test]
-    fn test_single_weighted_ld_pair() {
+    fn test_single_weighted_ld_pair() { //todo paper and pen this example as a sanity check
         use Symbol::*;
         let a = [A, A, A, A, C, A, C];
         let b = [A, A, A, G, T, A, A];

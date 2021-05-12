@@ -14,7 +14,7 @@ use weighted_ld::*;
 #[derive(Debug, StructOpt)]
 #[structopt(
     name = "weighted_ld",
-    about = "A tool for computing weighted linkage disequilibrium"
+    about = "A tool for computing sequence weighted linkage disequilibrium"
 )]
 struct Opt {
     #[structopt(long, help = "The source file to load")]
