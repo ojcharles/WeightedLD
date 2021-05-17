@@ -7,11 +7,13 @@ import argparse
 from pathlib import Path
 from Bio import AlignIO
 import numpy as np
+import sys
+import re
 
 
 logging.basicConfig(
     format='[%(levelname)s] %(asctime)s %(message)s',
-    level=logging.INFO,
+    level=logging.ERROR,
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 
@@ -177,7 +179,6 @@ def ld(alignment, weights, site_map):
         for second_site in range(first_site + 1, n_sites):
             # Form an array which contains all the sequences, but only the two target sites
             target_sites = alignment[:, (first_site, second_site)]
-
             # Remove all sequences with a bad symbol at either target site
             good_sequences = (target_sites < 5).all(axis=1)
             target_sites = target_sites[good_sequences, :]
@@ -188,8 +189,6 @@ def ld(alignment, weights, site_map):
             # Whether the given sequence is equal to the major symbol at the given site
             target_sites_major = np.zeros_like(target_sites, dtype=np.bool8)
             target_sites_domMinor = np.zeros_like(target_sites, dtype=np.bool8)
-
-            # astype np.bool8
 
             skip_site = False
             for site in (0, 1):
@@ -202,11 +201,12 @@ def ld(alignment, weights, site_map):
                     skip_site = True
                 # identifies positions with major_allele
                 major_symbol = unique_elements[counts.argmax()]
+                major_symbol = unique_elements[np.argsort(-counts)[0]]
                 target_sites_major[target_sites[:, site]
                                    == major_symbol, site] = True
                 if not skip_site:
                     # identifies positions with domMino_allele, if two are equal takes first
-                    domMinor_symbol = unique_elements[counts.argsort()[1]]
+                    domMinor_symbol = unique_elements[np.argsort(-counts)[1]]
                     target_sites_domMinor[target_sites[:, site]
                                           == domMinor_symbol, site] = True
             if skip_site:
@@ -218,10 +218,9 @@ def ld(alignment, weights, site_map):
             keep_second = target_sites_major[:,
                                              1] + target_sites_domMinor[:, 1]
             keep = np.array([keep_first, keep_second]).all(axis=0)
-
             # filter again
             target_sites = target_sites[keep, :]
-            target_weights = weights[keep]
+            target_weights = target_weights[keep]
             target_sites_major = target_sites_major[keep, ]
             target_seqs = target_sites.shape[0]
 
@@ -230,6 +229,12 @@ def ld(alignment, weights, site_map):
                 2, axis=1), ~target_sites_major).sum(axis=0) / total_weight
             Pa, Pb = np.ma.masked_array(target_weights.reshape(-1, 1).repeat(
                 2, axis=1), target_sites_major).sum(axis=0) / total_weight
+
+            # after removing sequences which not Maj or dMin in both sites, we may want to skip site
+            if round(PA, 1) == 1.0:
+                continue
+            if round(PB, 1) == 1.0:
+                continue
 
             # ----- predicted allele freqs if 0 LD
             PAB = PA * PB
@@ -279,10 +284,10 @@ def ld(alignment, weights, site_map):
                 f"{site_map[first_site]}\t{site_map[second_site]}\t{round(D, 4)}\t{round(DPrime, 4)}\t{round(R2, 4)}")
 
 
-def main(args):
-    logging.info("Reading FASTA data from %s", args.fasta_input)
+def handle_fasta(args):
+    logging.info("Reading FASTA data from %s", args.file)
     # convert fasta character alignment to integer matrix
-    alignment = read_fasta(args.fasta_input)
+    alignment = read_fasta(args.file)
     logging.info(
         "Finished reading data. Sequence count: %s, Sequence length %s", *alignment.shape)
 
@@ -294,32 +299,120 @@ def main(args):
         alignment, args.min_acgt, args.min_variability)
     logging.info("Found %s sites of interest", var_sites_LD.sum())
 
-    logging.info("Computing Henikoff weights for each sequence")
-    weightsHK = henikoff_weighting(alignment[:, var_sites_HK])
-
     # Trim down the alignment array to only include the sites of interest
     alignment = alignment[:, var_sites_LD]
 
     # Maps site indices in the trimmed down array to site indices in the original alignment
     site_map = np.where(var_sites_LD)[0]
 
-    weights1 = np.zeros(alignment.shape[0], dtype=np.uint16)
-    weights1[weights1 == 0] = 1
-    weights = weights1
+    return alignment, site_map
+
+
+def handle_vcf(filename):
+    # extract lines -> list
+    logging.info("Reading VCF data from %s", filename)
+    with open(filename, 'r') as f:
+        data = f.read().split("\n")
+    endline = len(data)
+
+    # is there a header block? if yes return header line and data block
+    is_vcf = False
+    for i, line in enumerate(data):
+        if re.search("#CHROM", line):
+            is_vcf = True
+            header = data[i]
+            data = data[(i+1):endline]
+            break
+    if is_vcf == False:
+        print(
+            "No #CHROM header block identified")
+        sys.exit(1)
+
+    # is there enough dat to be meaningful?
+    line = data[0].split("\t")
+    if len(line) <= 12:
+        print(
+            "The VCF data contains too small a population, are you sure this is a multi VCF?")
+        sys.exit(1)
+
+    # is the data haploid or diploid?
+    if(type(re.search(r"[0-2]|[0-2]", data[0])) == "NoneType"):
+        # the vcf is haploid
+        print(
+            "Well this is awkward, we haven't implemented a haploid VCF reader yet")
+        sys.exit(1)
+    else:
+
+        # the vcf is diploid
+        # now split any diploid -> haploid
+        for i, line in enumerate(data):
+            # remove | delimiters in extra cols
+            t = line.replace("|||", "")
+            t = t.replace("||", "")
+            t = re.sub(r"[^0-9]\|[^0-9]", "", t)
+            t = re.sub(r"[^0-9]\|[^0-9]", "", t)
+            # if any diplod calls are unphased (i.e. we do not know haplotype) treat as missing.
+            t = re.sub(r"./.", ".|.", t)
+            t = t.replace("|", "\t")
+            # replace .  with proper missing flag
+            t = re.sub(r"\.{1}", "4", t)
+
+            t = t.split("\t")
+            del t[2:9]
+            del t[0]
+            data[i] = t
+
+        del data[len(data)-1]  # it is standard to leave the last line blank
+
+    # we now have for each row the pos and haploid calls
+    # extract site_map - large numbers
+    site_map = np.array([item[0] for item in data], dtype=np.int64)
+
+    # force everything to uint8 - remove site_map col
+    alignment = np.array(data, dtype=np.uint8)
+    alignment = np.delete(alignment, 0, axis=1)
+    # so that its the same format as an alignment - for compatability with other functions
+    alignment = np.rot90(alignment)
+
+    logging.info(
+        "Finished reading data. Sequence count: %s, Sequence length %s", *alignment.shape)
+    return alignment, site_map
+
+
+def main(args):
+    filename = str(args.file)
+
+    if filename.endswith('.vcf'):
+        alignment, site_map = handle_vcf(filename)
+    else:
+        alignment, site_map = handle_fasta(args)
+
+    # default behaviour is Henikoff weighting, can be disabled
+    if args.unweighted:
+        logging.info("Unweighted")
+        weights = np.zeros(alignment.shape[0], dtype=np.uint8)
+        weights[weights == 0] = 1
+    else:
+        logging.info("Computing Henikoff weights for each sequence")
+        weights = henikoff_weighting(alignment)
+        # todo print weights to file
 
     logging.info("Computing the LD parameters")
+
     ld(alignment, weights, site_map)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WeightedLD computation tool")
-    parser.add_argument("--fasta-input", type=Path,
+    parser.add_argument("--file", type=Path,
                         help="The source file to load", required=True)
     parser.add_argument("--min-acgt", type=float, default=0.8,
                         help="Minimum fractions of ACTG at a given site for the site to be included in calculation.\
             increase this to remove more noise say 0.5")
     parser.add_argument("--min-variability", type=float, default=0.02,
                         help="Minimum fraction of minor symbols for a site to be considered")
+    parser.add_argument("--unweighted", action='store_true', default=False,
+                        help="Use unit weights instead of Henikoff weights")
 
     args = parser.parse_args()
     main(args)
