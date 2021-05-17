@@ -60,47 +60,57 @@ impl From<char> for Symbol {
     }
 }
 
-pub struct SymbolHistogram<T: num::Integer> {
-    data: [T; 6],
+pub struct SymbolHistogram {
+    data: [usize; 6],
 }
 
-impl<T: num::Integer> Index<Symbol> for SymbolHistogram<T> {
-    type Output = T;
+impl Index<Symbol> for SymbolHistogram {
+    type Output = usize;
 
     fn index(&self, index: Symbol) -> &Self::Output {
         &self.data[index as usize]
     }
 }
 
-impl<T: num::Integer> IndexMut<Symbol> for SymbolHistogram<T> {
+impl IndexMut<Symbol> for SymbolHistogram {
     fn index_mut(&mut self, index: Symbol) -> &mut Self::Output {
         &mut self.data[index as usize]
     }
 }
 
-impl<T: num::Integer + Copy + Sum> SymbolHistogram<T> {
+impl SymbolHistogram {
     fn zero() -> Self {
         Self {
-            data: [T::zero(); 6],
+            data: [0; 6],
         }
     }
 
     fn from_slice(symbols: &[Symbol]) -> Self {
         let mut hist = Self::zero();
         for symbol in symbols {
-            hist[*symbol] = hist[*symbol].add(T::one());
+            hist[*symbol] += 1;
         }
         hist
     }
 
-    fn acgt(&self) -> T {
+    fn acgt(&self) -> usize {
         use Symbol::*;
         self[A] + self[C] + self[G] + self[T]
     }
 
-    fn acgtm(&self) -> T {
+    fn acgtm(&self) -> usize {
         use Symbol::*;
         self[A] + self[C] + self[G] + self[T] + self[Missing]
+    }
+    
+    fn distinct_known_count(&self) -> usize {
+        use Symbol::*;
+
+        (if self[A] > 0 { 1usize } else { 0 }) +
+        if self[C] > 0 { 1 } else { 0 } +
+        if self[G] > 0 { 1 } else { 0 } +
+        if self[T] > 0 { 1 } else { 0 } +
+        if self[Missing] > 0 { 1 } else { 0 }
     }
 
     fn major_minor_symbols(&self) -> (Option<Symbol>, Option<Symbol>) {
@@ -108,10 +118,10 @@ impl<T: num::Integer + Copy + Sum> SymbolHistogram<T> {
         let mut minor = None;
 
         for sym in &[Symbol::A, Symbol::C, Symbol::G, Symbol::T, Symbol::Missing] {
-            if self[*sym] > major.map(|m| self[m]).unwrap_or(T::zero()) {
+            if self[*sym] > major.map(|m| self[m]).unwrap_or(0) {
                 minor = major;
                 major = Some(*sym);
-            } else if self[*sym] > minor.map(|m| self[m]).unwrap_or(T::zero()) {
+            } else if self[*sym] > minor.map(|m| self[m]).unwrap_or(0) {
                 minor = Some(*sym);
             }
         }
@@ -192,7 +202,6 @@ impl SiteSet {
                 seq_str
                     .chars()
                     .map(Symbol::from)
-                    // .map(Option::unwrap)
                     .collect::<Vec<_>>()
             })
             .map(|symbols| Sequence {
@@ -275,8 +284,8 @@ pub fn read_fasta<P: AsRef<Path>>(path: P) -> Result<MultiSequence, std::io::Err
 }
 
 /// Given a slice of all symbols in a site, should the site be considered for further computations
-pub fn is_site_of_interest(site: &[Symbol], min_acgt: u32, min_minor: f32, max_minor: f32) -> bool {
-    let hist = SymbolHistogram::<u32>::from_slice(site);
+pub fn is_site_of_interest(site: &[Symbol], min_acgt: usize, min_minor: f32, max_minor: f32) -> bool {
+    let hist = SymbolHistogram::from_slice(site);
 
     let acgt_count = hist.acgt();
 
@@ -326,19 +335,19 @@ pub fn henikoff_weights(data: &SiteSet) -> Vec<f32> {
 }
 
 pub fn henikoff_site_contributions(site: &[Symbol], contributions: &mut [f32]) {
-    let hist = SymbolHistogram::<u32>::from_slice(site);
+    let hist = SymbolHistogram::from_slice(site);
 
-    let acgtm_count = hist.acgtm() as f32;
+    let distinct_count = hist.distinct_known_count() as f32;
     let mut total_site_contrib = 0f32;
 
     for (idx, sym) in site.iter().enumerate() {
         if sym.is_acgtm() {
-            contributions[idx] = 1f32 / (acgtm_count * hist[*sym] as f32);
+            contributions[idx] = 1f32 / (distinct_count * hist[*sym] as f32);
             total_site_contrib += contributions[idx];
         }
     }
 
-    let mean_site_contrib = total_site_contrib / acgtm_count;
+    let mean_site_contrib = total_site_contrib / distinct_count;
 
     for (idx, sym) in site.iter().enumerate() {
         if !sym.is_acgtm() {
@@ -361,8 +370,8 @@ pub fn single_weighted_ld_pair(a: &[Symbol], b: &[Symbol], weights: &[f32]) -> O
 
     // TODO: It is wasteful to compute these histograms for every pair - should
     // lift their computations outside the pairwise loop.
-    let a_hist = SymbolHistogram::<u32>::from_slice(a);
-    let b_hist = SymbolHistogram::<u32>::from_slice(b);
+    let a_hist = SymbolHistogram::from_slice(a);
+    let b_hist = SymbolHistogram::from_slice(b);
 
     let (a_maj_sym, a_min_sym) = match a_hist.major_minor_symbols() {
         (Some(maj), Some(min)) => (maj, min),
@@ -566,7 +575,7 @@ mod tests {
     fn test_histogram_from_slice() {
         use Symbol::*;
         let a = [A, A, A, C, C, G, T, T, T, T, Missing, Missing, Unknown];
-        let hist = SymbolHistogram::<u8>::from_slice(&a);
+        let hist = SymbolHistogram::from_slice(&a);
 
         assert_eq!(hist[A], 3);
         assert_eq!(hist[C], 2);
