@@ -10,6 +10,9 @@ temp
 
 # dirs for paper
 paper/
+temp/
+
+# R - sorry for my sins
 *.R
 .RHistory
 .RData

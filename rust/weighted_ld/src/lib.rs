@@ -32,6 +32,13 @@ impl Symbol {
             Symbol::Missing | Symbol::Unknown => false,
         }
     }
+
+    pub fn is_acgtm(&self) -> bool {
+        match self {
+            Symbol::A | Symbol::C | Symbol::G | Symbol::T | Symbol::Missing => true,
+            Symbol::Unknown => false,
+        }
+    }
 }
 
 impl Default for Symbol {
@@ -53,42 +60,57 @@ impl From<char> for Symbol {
     }
 }
 
-pub struct SymbolHistogram<T: num::Integer> {
-    data: [T; 6],
+pub struct SymbolHistogram {
+    data: [usize; 6],
 }
 
-impl<T: num::Integer> Index<Symbol> for SymbolHistogram<T> {
-    type Output = T;
+impl Index<Symbol> for SymbolHistogram {
+    type Output = usize;
 
     fn index(&self, index: Symbol) -> &Self::Output {
         &self.data[index as usize]
     }
 }
 
-impl<T: num::Integer> IndexMut<Symbol> for SymbolHistogram<T> {
+impl IndexMut<Symbol> for SymbolHistogram {
     fn index_mut(&mut self, index: Symbol) -> &mut Self::Output {
         &mut self.data[index as usize]
     }
 }
 
-impl<T: num::Integer + Copy + Sum> SymbolHistogram<T> {
+impl SymbolHistogram {
     fn zero() -> Self {
         Self {
-            data: [T::zero(); 6],
+            data: [0; 6],
         }
     }
 
     fn from_slice(symbols: &[Symbol]) -> Self {
         let mut hist = Self::zero();
         for symbol in symbols {
-            hist[*symbol] = hist[*symbol].add(T::one());
+            hist[*symbol] += 1;
         }
         hist
     }
 
-    fn acgt(&self) -> T {
+    fn acgt(&self) -> usize {
         use Symbol::*;
         self[A] + self[C] + self[G] + self[T]
+    }
+
+    fn acgtm(&self) -> usize {
+        use Symbol::*;
+        self[A] + self[C] + self[G] + self[T] + self[Missing]
+    }
+    
+    fn distinct_known_count(&self) -> usize {
+        use Symbol::*;
+
+        (if self[A] > 0 { 1usize } else { 0 }) +
+        if self[C] > 0 { 1 } else { 0 } +
+        if self[G] > 0 { 1 } else { 0 } +
+        if self[T] > 0 { 1 } else { 0 } +
+        if self[Missing] > 0 { 1 } else { 0 }
     }
 
     fn major_minor_symbols(&self) -> (Option<Symbol>, Option<Symbol>) {
@@ -96,10 +118,10 @@ impl<T: num::Integer + Copy + Sum> SymbolHistogram<T> {
         let mut minor = None;
 
         for sym in &[Symbol::A, Symbol::C, Symbol::G, Symbol::T, Symbol::Missing] {
-            if self[*sym] > major.map(|m| self[m]).unwrap_or(T::zero()) {
+            if self[*sym] > major.map(|m| self[m]).unwrap_or(0) {
                 minor = major;
                 major = Some(*sym);
-            } else if self[*sym] > minor.map(|m| self[m]).unwrap_or(T::zero()) {
+            } else if self[*sym] > minor.map(|m| self[m]).unwrap_or(0) {
                 minor = Some(*sym);
             }
         }
@@ -115,6 +137,7 @@ pub struct Sequence {
 
 pub enum MultiSequenceSource {
     FastaFile(PathBuf),
+    None,
 }
 
 pub struct MultiSequence {
@@ -169,6 +192,28 @@ impl SiteSet {
             buffer,
             site_map: None,
         }
+    }
+
+    #[cfg(test)]
+    pub fn from_strs(raw: &[&str]) -> Self {
+        let sequences = raw
+            .iter()
+            .map(|seq_str| {
+                seq_str
+                    .chars()
+                    .map(Symbol::from)
+                    .collect::<Vec<_>>()
+            })
+            .map(|symbols| Sequence {
+                name: None,
+                symbols,
+            })
+            .collect::<Vec<Sequence>>();
+
+        Self::from_multiseq(&MultiSequence {
+            source: MultiSequenceSource::None,
+            sequences,
+        })
     }
 
     pub fn filter_by(&self, filter_func: impl Fn(&[Symbol]) -> bool) -> Self {
@@ -238,9 +283,9 @@ pub fn read_fasta<P: AsRef<Path>>(path: P) -> Result<MultiSequence, std::io::Err
     Ok(MultiSequence { source, sequences })
 }
 
-/// Given a slice of all symbols in a site, should the site be considered for LD computations
-pub fn is_site_of_interest(site: &[Symbol], min_acgt: u32, min_minor: f32, max_minor: f32) -> bool {
-    let hist = SymbolHistogram::<u32>::from_slice(site);
+/// Given a slice of all symbols in a site, should the site be considered for further computations
+pub fn is_site_of_interest(site: &[Symbol], min_acgt: usize, min_minor: f32, max_minor: f32) -> bool {
+    let hist = SymbolHistogram::from_slice(site);
 
     let acgt_count = hist.acgt();
 
@@ -290,22 +335,22 @@ pub fn henikoff_weights(data: &SiteSet) -> Vec<f32> {
 }
 
 pub fn henikoff_site_contributions(site: &[Symbol], contributions: &mut [f32]) {
-    let hist = SymbolHistogram::<u32>::from_slice(site);
+    let hist = SymbolHistogram::from_slice(site);
 
-    let nuc_count = hist.acgt() as f32 + hist[Symbol::Missing] as f32;
+    let distinct_count = hist.distinct_known_count() as f32;
     let mut total_site_contrib = 0f32;
 
     for (idx, sym) in site.iter().enumerate() {
-        if *sym != Symbol::Unknown {
-            contributions[idx] = 1f32 / (nuc_count * hist[*sym] as f32);
+        if sym.is_acgtm() {
+            contributions[idx] = 1f32 / (distinct_count * hist[*sym] as f32);
             total_site_contrib += contributions[idx];
         }
     }
 
-    let mean_site_contrib = total_site_contrib / nuc_count;
+    let mean_site_contrib = total_site_contrib / distinct_count;
 
     for (idx, sym) in site.iter().enumerate() {
-        if *sym == Symbol::Unknown {
+        if !sym.is_acgtm() {
             contributions[idx] = mean_site_contrib;
         }
     }
@@ -325,8 +370,8 @@ pub fn single_weighted_ld_pair(a: &[Symbol], b: &[Symbol], weights: &[f32]) -> O
 
     // TODO: It is wasteful to compute these histograms for every pair - should
     // lift their computations outside the pairwise loop.
-    let a_hist = SymbolHistogram::<u32>::from_slice(a);
-    let b_hist = SymbolHistogram::<u32>::from_slice(b);
+    let a_hist = SymbolHistogram::from_slice(a);
+    let b_hist = SymbolHistogram::from_slice(b);
 
     let (a_maj_sym, a_min_sym) = match a_hist.major_minor_symbols() {
         (Some(maj), Some(min)) => (maj, min),
@@ -409,9 +454,9 @@ pub fn single_weighted_ld_pair(a: &[Symbol], b: &[Symbol], weights: &[f32]) -> O
             denominator = (-ld_obs[0]).min(-ld_obs[3]);
         }
     } else {
-        denominator = (-ld_obs[1]).min(-ld_obs[2]);
+        denominator = (ld_obs[1]).min(ld_obs[2]);
         if denominator == 0f32 {
-            denominator = (-ld_obs[1]).max(-ld_obs[2]);
+            denominator = (ld_obs[1]).max(ld_obs[2]);
         }
     }
     let d_prime = d / denominator;
@@ -524,19 +569,21 @@ pub fn all_weighted_ld_pairs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use approx::*;
 
     #[test]
     fn test_histogram_from_slice() {
         use Symbol::*;
-        let a = [A, A, A, C, C, G, T, T, T, T];
-        let hist = SymbolHistogram::<u8>::from_slice(&a);
+        let a = [A, A, A, C, C, G, T, T, T, T, Missing, Missing, Unknown];
+        let hist = SymbolHistogram::from_slice(&a);
 
         assert_eq!(hist[A], 3);
         assert_eq!(hist[C], 2);
         assert_eq!(hist[G], 1);
         assert_eq!(hist[T], 4);
+        assert_eq!(hist[Missing], 2);
+        assert_eq!(hist[Unknown], 1);
     }
-
     #[test]
     fn test_hist_major_minor() {
         use Symbol::*;
@@ -554,5 +601,79 @@ mod tests {
         let (maj, min) = hist.major_minor_symbols();
         assert_eq!(maj, Some(G));
         assert_eq!(min, Some(C));
+
+        let hist = SymbolHistogram {
+            data: [1, 1, 40, 2, 4, 0],
+        };
+        let (maj, min) = hist.major_minor_symbols();
+        assert_eq!(maj, Some(G));
+        assert_eq!(min, Some(Missing));
+    }
+
+    #[test]
+    fn test_henikoff_weights_1() {
+        // as in the Henikoff and henikoff 1994 paper
+        let siteset = SiteSet::from_strs(&["AAAAA", "AAAAA", "CCCCC", "CCCCC", "TTTTT"]);
+        assert_ulps_eq!(henikoff_weights(&siteset)[..], [0.5, 0.5, 0.5, 0.5, 1.0]);
+    }
+
+    #[test]
+    fn test_henikoff_weights_2() {
+        // as in S.F. Altschul NIH
+        let siteset = SiteSet::from_strs(&["GCGTTAGC", "GAGTTGGA", "CGGACTAA"]);
+        assert_abs_diff_eq!(henikoff_weights(&siteset)[..], [0.769, 0.692, 1.0], epsilon = 0.001); // todo ever so slightly off could be float point error
+    }
+
+    #[test]
+    fn test_henikoff_weights_3() {
+        // ensure that indels are treated equally - seq 2 is most unique
+        // 0.9166 , 1.25, 0.9166, 0.9166 -> 0.7333, 1, 0.7333, 0.7333
+        let siteset = SiteSet::from_strs(&["AAGA", "AA-A", "GGGG", "GGGG"]);
+        assert_abs_diff_eq!(henikoff_weights(&siteset)[..], [0.733, 1.0, 0.733, 0.733], epsilon = 0.001); // todo handle assert nearly equal
+    }
+
+    #[test]
+    fn test_ld_pair_unweighted_ld0() {
+        use Symbol::*;
+        let a = [A, A, A, A, T, T, T, T ];
+        let b = [T, T, A, A, A, A, T, T ];
+        let weights = [1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0];
+
+        let ld_stats = single_weighted_ld_pair(&a, &b, &weights)
+            .expect("Expected test case to have LD statistics available");
+
+        assert_abs_diff_eq!(ld_stats.d, 0.0, epsilon = 1e-5);
+        assert_abs_diff_eq!(ld_stats.d_prime, 0.0, epsilon = 1e-5);
+        assert_abs_diff_eq!(ld_stats.r2, 0.0, epsilon = 1e-5);
+    }
+
+    #[test]
+    fn test_ld_pair_unweighted_ld1() {
+        use Symbol::*;
+        let a = [A, A, A, A, T, T, T, T ];
+        let b = [T, T, T, T, A, A, A, A ];
+        let weights = [1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0];
+
+        let ld_stats = single_weighted_ld_pair(&a, &b, &weights)
+            .expect("Expected test case to have LD statistics available");
+        println!("{}",&ld_stats.d);
+        assert_abs_diff_eq!(ld_stats.d, 0.25, epsilon = 1e-5);
+        assert_abs_diff_eq!(ld_stats.d_prime, 0.5, epsilon = 1e-5);
+        assert_abs_diff_eq!(ld_stats.r2, 1.0, epsilon = 1e-5);
+    }
+
+    #[test]
+    fn test_single_weighted_ld_pair() { //todo paper and pen this example as a sanity check
+        use Symbol::*;
+        let a = [A, A, A, A, C, A, C];
+        let b = [A, A, A, G, T, A, A];
+        let weights = [1.0, 1.0, 0.4, 0.2, 0.5, 0.8, 0.2];
+
+        let ld_stats = single_weighted_ld_pair(&a, &b, &weights)
+            .expect("Expected test case to have LD statistics available");
+
+        assert_abs_diff_eq!(ld_stats.d, 0.00308, epsilon = 1e-5);
+        assert_abs_diff_eq!(ld_stats.d_prime, 0.05555, epsilon = 1e-5);
+        assert_abs_diff_eq!(ld_stats.r2, 0.00346, epsilon = 1e-5);
     }
 }

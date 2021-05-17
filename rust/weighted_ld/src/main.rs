@@ -14,7 +14,7 @@ use weighted_ld::*;
 #[derive(Debug, StructOpt)]
 #[structopt(
     name = "weighted_ld",
-    about = "A tool for computing weighted linkage disequilibrium"
+    about = "A tool for computing sequence weighted linkage disequilibrium"
 )]
 struct Opt {
     #[structopt(long, help = "The source file to load")]
@@ -136,7 +136,7 @@ fn main() -> Result<(), std::io::Error> {
     );
 
     let sw = Instant::now();
-    let min_acgt = (opt.min_acgt * siteset.n_seqs() as f32).ceil() as u32;
+    let min_acgt = (opt.min_acgt * siteset.n_seqs() as f32).ceil() as usize;
     let min_minor = opt.min_minor;
     let max_minor = opt.max_minor;
     let filtered_siteset =
