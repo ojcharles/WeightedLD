@@ -602,19 +602,25 @@ mod tests {
     }
 
     #[test]
-    fn test_henikoff_weights() {
+    fn test_henikoff_weights_1() {
         // as in the Henikoff and henikoff 1994 paper
         let siteset = SiteSet::from_strs(&["AAAAA", "AAAAA", "CCCCC", "CCCCC", "TTTTT"]);
         assert_ulps_eq!(henikoff_weights(&siteset)[..], [0.5, 0.5, 0.5, 0.5, 1.0]);
+    }
 
+    #[test]
+    fn test_henikoff_weights_2() {
         // as in S.F. Altschul NIH
-        // let siteset2 = SiteSet::from_strs(&["GCGTTAGC", "GAGTTGGA", "CGGACTAA"]);
-        //assert_ulps_eq!(henikoff_weights(&siteset2)[..], [0.769, 0.692, 1.0]); // todo ever so slightly off could be float point error
+        let siteset = SiteSet::from_strs(&["GCGTTAGC", "GAGTTGGA", "CGGACTAA"]);
+        assert_abs_diff_eq!(henikoff_weights(&siteset)[..], [0.769, 0.692, 1.0], epsilon = 0.001); // todo ever so slightly off could be float point error
+    }
 
+    #[test]
+    fn test_henikoff_weights_3() {
         // ensure that indels are treated equally - seq 2 is most unique
         // 0.9166 , 1.25, 0.9166, 0.9166 -> 0.7333, 1, 0.7333, 0.7333
-        // let siteset3 = SiteSet::from_strs(&["AAGA", "AA-A", "GGGG", "GGGG"]);
-        //assert_ulps_eq!(henikoff_weights(&siteset3)[..], [0.733, 1.0, 0.733, 0.733],max_ulps = 2); // todo handle assert nearly equal
+        let siteset = SiteSet::from_strs(&["AAGA", "AA-A", "GGGG", "GGGG"]);
+        assert_abs_diff_eq!(henikoff_weights(&siteset)[..], [0.733, 1.0, 0.733, 0.733], epsilon = 0.001); // todo handle assert nearly equal
     }
 
     #[test]
