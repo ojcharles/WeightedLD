@@ -17,7 +17,7 @@ structopt = "0.3"
 env_logger = "0.8"
 human_format = "1"
 indicatif = "0.15"
-packed_simd = { version = "0.3.4", package = "packed_simd_2" }
+packed_simd = { version = "0.3.5", package = "packed_simd_2" }
 bytemuck = "1.5"
 
 [dev-dependencies]
