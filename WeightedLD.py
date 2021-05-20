@@ -129,16 +129,16 @@ def henikoff_weighting(alignment: np.ndarray) -> np.ndarray:
         count_base[base, :] = (alignment == base).sum(axis=0)
 
     # For each site, the count of sequences with an informative nucleotide at that site
-    t_seqs = np.sum(count_base[:5, :], axis=0)
-
+    unique_base = len(np.unique(count_base[:5, :], axis=0))
     site_contribution = np.zeros(alignment.shape)
     site_contribution[ok_base] = 1 / \
-        (t_seqs * count_base[alignment, np.arange(n_sites)])[ok_base]
+        (unique_base * count_base[alignment, np.arange(n_sites)])[ok_base]
 
     # For each ambiguous base, fill in the average contribution across all
     # sequences with concrete bases for that site
     site_contribution[~ok_base] = 0
-    site_average_weight = site_contribution.sum(axis=0) / t_seqs
+    site_average_weight = site_contribution.sum(
+        axis=0) / np.sum(count_base[:5, :], axis=0)
     site_contribution[~ok_base] = np.broadcast_to(
         site_average_weight, site_contribution.shape)[~ok_base]
 
