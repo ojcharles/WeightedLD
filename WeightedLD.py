@@ -101,7 +101,6 @@ def compute_variable_sites(alignment: np.ndarray, min_acgt: float, min_variabili
 def henikoff_weighting(alignment: np.ndarray) -> np.ndarray:
     """
     The Henikoff weighting for each sequence in the given alignment array.
-
     ref:
         Steven Henikoff and Jorja G. Henikoff (1994) "Position-based Sequence Weights"
 
