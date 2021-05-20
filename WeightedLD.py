@@ -60,7 +60,7 @@ def compute_variable_sites(alignment: np.ndarray, min_acgt: float, min_variabili
     Returns:
         2 member tuple of 1D boolean arrays of length n_sites, which is True for each site that
         meets the criteria.
-        1 relevant for Henikoff calculations
+        1 relevant for Henikoff calculations - 
         2 relevant for LD calculations
     """
 
@@ -89,10 +89,9 @@ def compute_variable_sites(alignment: np.ndarray, min_acgt: float, min_variabili
     # Does the minor symbol occur at a high enough frequency
     has_min_variability = minor_fraction >= min_variability
 
-    # consider a small set of sequences from a recombining population, there could be multiple SNP clues occuring in a small fraction of sequences that together help define a cluster by pairwise distance
-    # these are the only filters we want to apply for weighting - as we want to allow for  very minor population SNP's
-    # any variability
-    return_hk_varsites = sufficient_data & multiple_non_ambiguous
+    # invariant sites should be included, so we should only exclude sites with poor coverage
+    return_hk_varsites = sufficient_data
+
     # has enough variability to return useful LD data
     return_ld_varsites = sufficient_data & has_min_variability
 
