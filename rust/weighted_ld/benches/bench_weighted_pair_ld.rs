@@ -34,8 +34,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     for len in [10, 50, 100, 250, 500, 1000].iter() {
         let seq_a = make_sequence(*len, 0.1, 0.6);
         let seq_b = make_sequence(*len, 0.1, 0.6);
-        let a_hist = SymbolHistogram::<u32>::from_slice(&seq_a);
-        let b_hist = SymbolHistogram::<u32>::from_slice(&seq_b);
+        let a_hist = SymbolHistogram::from_slice(&seq_a);
+        let b_hist = SymbolHistogram::from_slice(&seq_b);
 
         let mut weights = vec![0f32; *len];
         // Defaults to uniforms in the range 0..1
