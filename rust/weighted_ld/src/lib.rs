@@ -447,26 +447,32 @@ pub fn single_weighted_ld_pair(
         }
 
         total_weight += weights[seq];
-        match (a[seq] == a_maj_sym, b[seq] == b_maj_sym) {
-            (true, true) => {
-                PA += weights[seq];
-                ld_obs[3] += weights[seq];
-            }
-            (true, false) => PA += weights[seq],
-            (false, true) => PB += weights[seq],
-            (false, false) => (),
+        if a[seq] == a_maj_sym {
+            PA += weights[seq];
+        }
+        if b[seq] == b_maj_sym {
+            PB += weights[seq];
+        }
+
+        if a[seq] == a_maj_sym && b[seq] == b_maj_sym {
+            ld_obs[3] += weights[seq];
         }
     }
 
-    PA /= total_weight;
-    PB /= total_weight;
-    ld_obs[3] /= total_weight;
-
-    let Pa = 1.0 - PA;
-    let Pb = 1.0 - PB;
+    let mut Pa = total_weight - PA;
+    let mut Pb = total_weight - PB;
     ld_obs[2] = PA - ld_obs[3];
     ld_obs[1] = PB - ld_obs[3];
     ld_obs[0] = Pa - ld_obs[1];
+
+    PA /= total_weight;
+    PB /= total_weight;
+    Pa /= total_weight;
+    Pb /= total_weight;
+    ld_obs[0] /= total_weight;
+    ld_obs[1] /= total_weight;
+    ld_obs[2] /= total_weight;
+    ld_obs[3] /= total_weight;
 
     let PAB = PA * PB;
     let PAb = PA * Pb;
