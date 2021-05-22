@@ -60,7 +60,7 @@ def compute_variable_sites(alignment: np.ndarray, min_acgt: float, min_variabili
     Returns:
         2 member tuple of 1D boolean arrays of length n_sites, which is True for each site that
         meets the criteria.
-        1 relevant for Henikoff calculations - 
+        1 relevant for Henikoff calculations
         2 relevant for LD calculations
     """
 
@@ -128,9 +128,11 @@ def henikoff_weighting(alignment: np.ndarray) -> np.ndarray:
     for base in range(6):
         count_base[base, :] = (alignment == base).sum(axis=0)
 
-    # For each site, the count of sequences with an informative nucleotide at that site
+    # For each site, the count of unique bases at that site
     unique_base = len(np.unique(count_base[:5, :], axis=0))
     site_contribution = np.zeros(alignment.shape)
+
+    # The Henikoff weighting per site, per ok base
     site_contribution[ok_base] = 1 / \
         (unique_base * count_base[alignment, np.arange(n_sites)])[ok_base]
 
