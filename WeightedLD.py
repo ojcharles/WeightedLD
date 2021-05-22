@@ -89,10 +89,9 @@ def compute_variable_sites(alignment: np.ndarray, min_acgt: float, min_variabili
     # Does the minor symbol occur at a high enough frequency
     has_min_variability = minor_fraction >= min_variability
 
-    # consider a small set of sequences from a recombining population, there could be multiple SNP clues occuring in a small fraction of sequences that together help define a cluster by pairwise distance
-    # these are the only filters we want to apply for weighting - as we want to allow for  very minor population SNP's
-    # any variability
-    return_hk_varsites = sufficient_data & multiple_non_ambiguous
+    # invariant sites should be included, so we should only exclude sites with poor coverage
+    return_hk_varsites = sufficient_data
+
     # has enough variability to return useful LD data
     return_ld_varsites = sufficient_data & has_min_variability
 
@@ -102,7 +101,6 @@ def compute_variable_sites(alignment: np.ndarray, min_acgt: float, min_variabili
 def henikoff_weighting(alignment: np.ndarray) -> np.ndarray:
     """
     The Henikoff weighting for each sequence in the given alignment array.
-
     ref:
         Steven Henikoff and Jorja G. Henikoff (1994) "Position-based Sequence Weights"
 
@@ -130,17 +128,19 @@ def henikoff_weighting(alignment: np.ndarray) -> np.ndarray:
     for base in range(6):
         count_base[base, :] = (alignment == base).sum(axis=0)
 
-    # For each site, the count of sequences with an informative nucleotide at that site
-    t_seqs = np.sum(count_base[:5, :], axis=0)
-
+    # For each site, the count of unique bases at that site
+    unique_base = len(np.unique(count_base[:5, :], axis=0))
     site_contribution = np.zeros(alignment.shape)
+
+    # The Henikoff weighting per site, per ok base
     site_contribution[ok_base] = 1 / \
-        (t_seqs * count_base[alignment, np.arange(n_sites)])[ok_base]
+        (unique_base * count_base[alignment, np.arange(n_sites)])[ok_base]
 
     # For each ambiguous base, fill in the average contribution across all
     # sequences with concrete bases for that site
     site_contribution[~ok_base] = 0
-    site_average_weight = site_contribution.sum(axis=0) / t_seqs
+    site_average_weight = site_contribution.sum(
+        axis=0) / np.sum(count_base[:5, :], axis=0)
     site_contribution[~ok_base] = np.broadcast_to(
         site_average_weight, site_contribution.shape)[~ok_base]
 
