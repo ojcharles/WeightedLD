@@ -4,8 +4,9 @@ The application of sequencing weighting to calculations of pairwise Linkage Dise
 
 Given a Multiple Sequence Alignment (MSA) or Variant Call File (VCF) the program will calculate per sequence its weight using the Henikoff* methodology, which is then employed in calculating the observed and expected allele frequencies , rather than treating each sequence evenly,  to produce LD metrics D, D' & r2.
 
---- *our paper link goes here*
---- Henikoff, S. & Henikoff, J. G. Position-based sequence weights. _Journal of Molecular Biology_ **243**, 574–578 (1994).
+-- *our paper link goes here*
+
+-- Henikoff, S. & Henikoff, J. G. Position-based sequence weights. _Journal of Molecular Biology_ **243**, 574–578 (1994).
 
 
 ## installation
