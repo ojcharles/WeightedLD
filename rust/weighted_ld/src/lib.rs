@@ -12,8 +12,10 @@ use std::{
 
 use ndarray::prelude::*;
 use num_derive::FromPrimitive;
-use packed_simd::{f32x8, u8x8};
 use rayon::prelude::*;
+
+#[cfg(feature="simd")]
+use packed_simd::{f32x8, u8x8};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, FromPrimitive)]
 #[repr(u8)]
@@ -61,8 +63,10 @@ impl From<char> for Symbol {
     }
 }
 
+#[cfg(feature="simd")]
 unsafe impl bytemuck::Zeroable for Symbol {}
 
+#[cfg(feature="simd")]
 unsafe impl bytemuck::Pod for Symbol {}
 
 #[derive(Clone, Debug)]
@@ -402,41 +406,57 @@ pub fn single_weighted_ld_pair(
         (Some(maj), Some(min)) => (maj, min),
         _ => return None,
     };
-
-    let mut total_weight = f32x8::splat(0.0);
-    let mut PA = f32x8::splat(0.0);
-    let mut PB = f32x8::splat(0.0);
-    let mut ld_3 = f32x8::splat(0.0);
-
+    
+    #[cfg(feature="simd")]
     let simd_end = (a.len() / 8) * 8;
-    for seq in (0..simd_end).step_by(8) {
-        let a = bytemuck::cast_slice::<Symbol, u8>(&a[seq..(seq + 8)]);
-        let a = u8x8::from_slice_unaligned(a);
 
-        let b = bytemuck::cast_slice::<Symbol, u8>(&b[seq..(seq + 8)]);
-        let b = u8x8::from_slice_unaligned(b);
+    #[cfg(not(feature="simd"))]
+    let simd_end = 0;
 
-        let a_maj = a.eq(u8x8::splat(a_maj_sym as u8));
-        let a_min = a.eq(u8x8::splat(a_min_sym as u8));
-        let b_maj = b.eq(u8x8::splat(b_maj_sym as u8));
-        let b_min = b.eq(u8x8::splat(b_min_sym as u8));
+    #[cfg(feature="simd")]
+    let (mut total_weight, mut PA, mut PB, mut ld_obs) = {
+        let mut total_weight = f32x8::splat(0.0);
+        let mut PA = f32x8::splat(0.0);
+        let mut PB = f32x8::splat(0.0);
+        let mut ld_3 = f32x8::splat(0.0);
 
-        let mask = (a_maj | a_min) & (b_maj | b_min);
-        let weight = f32x8::from_slice_unaligned(&weights[seq..(seq + 8)]);
+        for seq in (0..simd_end).step_by(8) {
+            let a = bytemuck::cast_slice::<Symbol, u8>(&a[seq..(seq + 8)]);
+            let a = u8x8::from_slice_unaligned(a);
 
-        let zero = f32x8::splat(0.0);
-        let weight = mask.select(weight, zero);
+            let b = bytemuck::cast_slice::<Symbol, u8>(&b[seq..(seq + 8)]);
+            let b = u8x8::from_slice_unaligned(b);
 
-        total_weight += weight;
-        PA += a_maj.select(weight, zero);
-        PB += b_maj.select(weight, zero);
-        ld_3 += (a_maj & b_maj).select(weight, zero);
-    }
+            let a_maj = a.eq(u8x8::splat(a_maj_sym as u8));
+            let a_min = a.eq(u8x8::splat(a_min_sym as u8));
+            let b_maj = b.eq(u8x8::splat(b_maj_sym as u8));
+            let b_min = b.eq(u8x8::splat(b_min_sym as u8));
 
-    let mut total_weight = total_weight.sum();
-    let mut PA = PA.sum();
-    let mut PB = PB.sum();
-    let mut ld_obs = [0.0, 0.0, 0.0, ld_3.sum()];
+            let mask = (a_maj | a_min) & (b_maj | b_min);
+            let weight = f32x8::from_slice_unaligned(&weights[seq..(seq + 8)]);
+
+            let zero = f32x8::splat(0.0);
+            let weight = mask.select(weight, zero);
+
+            total_weight += weight;
+            PA += a_maj.select(weight, zero);
+            PB += b_maj.select(weight, zero);
+            ld_3 += (a_maj & b_maj).select(weight, zero);
+        }
+
+        (
+            total_weight.sum(),
+            PA.sum(),
+            PB.sum(),
+            [0.0, 0.0, 0.0, ld_3.sum()],
+        )
+    };
+
+    #[cfg(not(feature="simd"))]
+    let (mut total_weight, mut PA, mut PB, mut ld_obs) = (
+        0.0, 0.0, 0.0, [0.0, 0.0, 0.0, 0.0]
+    );
+
 
     for seq in simd_end..a.len() {
         if !(a[seq] == a_maj_sym || a[seq] == a_min_sym) {
