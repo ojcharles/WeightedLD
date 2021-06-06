@@ -1,55 +1,59 @@
-requirements
+# WeightedLD
+
+The application of sequencing weighting to calculations of pairwise Linkage Disequilibrium (LD).
+
+Given a Multiple Sequence Alignment (MSA) or Variant Call File (VCF) the program will calculate per sequence its weight using the Henikoff* methodology, which is then employed in calculating the observed and expected allele frequencies , rather than treating each sequence evenly,  to produce LD metrics D, D' & r2.
+
+-- *our paper link goes here*
+
+-- Henikoff, S. & Henikoff, J. G. Position-based sequence weights. _Journal of Molecular Biology_ **243**, 574–578 (1994).
 
 
+## installation
+**Get WeightedLD**
+> wget https://github.com/ojcharles/WeightedLD/archive/refs/heads/main.zip
+> unzip main.zip
+> cd WeightedLD-main
 
-1 - read alignment
-    type fasta [*.fasta, *.fa]
+**Python**
+Install the required dependencies with conda, or manually
+> conda env create -f environment.yml
 
+**Rust**
+Install rustup https://rustup.rs/
+> cd rust/weighted_ld
+> cargo build --release
 
-2 - convert alignment to integer matrix
-    "A","C","T","G","-","OTHER"
-     0   1   2   3   4     5
+## usage
+**Python**
+At its most basic usage, only the `--file` argument is required
 
+    python WeightedLD.py --file my_alignment.fasta
+    
+`--min-variability` can be used to alter the number of sites for which LD is computed, default: 0.02
 
-identify variable sites for henikoff
-    okbase = count those with [0,1,2,3] 
-        we want to compute "-" in henikoff, but ignore sites with too many "-", or ambiguous bases, they may infer poor sequencing
-    sufficient_data =   frac_okbase > input.min_acgt_fraction  //i.e. sum(0-3) / nSeq = 0.9 and  0.9 > 0.8 so TRUE
-    has_variation   =   has any level of variation for [0,1,2,3,4] i.e. 99 A and 1 -
-    no cap on max variability
-    return boolean of sites which have: sufficient_data & has_variation i.e. T,F,T,T,T,F,T
+`--min-acgt` gives the program a way to filter out sites for both LD and weighting calculations where there is poor sequence coverage, default: 0.8
 
+`--unweighted` calculates "vanilla" LD scores such as those in PLINK.
 
-identify variable sites for LD  //as in henikoff, and in addition:
-    // as alignments can have three+ almost equal bases at a position
-    identify major_base at site
-    identify most dominant minor base. i.e. [AAACCT] Major -> A, domMinor -> C
-    minor_fraction = dominant_minor_count / (dominant_minor_count + major_count)
-        // This should be fine, as ignoring second anf third most important base just increases minor_fraction
-    has_min_variability minor_fraction >= min_variability
-    return boolean of sites: sufficient_data & has_variation * has_min_variability i.e. F,F,T,T,T,F,T
-    // no need for major frac check now, as we will exclude in LD. ie limit to only two types of base and throw out everyhing thats not Maj or majMin
+Bringing these together
 
-
-Calculate Henikoff sequence weights
-    input is the matrix alignment including 4 and 5's.
-    calculate the score per sequence treating 0,1,2,3,4 as unique ok values
-    keep track of mean score per site
-    sequences at a site wih 5 are given the mean value for that site
-    each sequence accumulates a total weight, sum of weights across all sites
-    final step is normalising, such that the most unique sequence has weight of 1
+    python WeightedLD.py --file my_alignment.fasta -- min-variability 0.1 --min-acgt 0.95 --unweighted
 
 
-calculate weighted LD
-    by sequence number, not weight contribution
-        Identify Major base //should be limited to 0-3, only in an extreme case of 5 equal bases with  ambigious only in acgt will this error
-        Identify dominant Minor base 0-4
-    Identify ambigous bases
-    remove sequences from calculation that are ambiguous, or (not in Major & dominant Minor).  union of pairwise sites
-    calculate predicted PA, Pa, QB, Qb from real allele fractions
-    sum up observed AB, Ab, aB, ab
-    calculate D, D' and R2 per site.
-    if r2 above 0.05 return else skip.
+**Rust**
+
+At its most basic usage, only the `--input` and `--pair-output` arguments are required.
+
+    weighted_ld --input my_alignment.fasta --pair-output my_alignment.wld
+    
+Other arguments
+
+`--min-minor` the minimum minor allele frequency
+`--min-acgt` gives the program a way to filter out sites for both LD and weighting calculations where there is poor sequence coverage, default: 0.8
+`--r2-threshold`  the minimum pairwise r2 value to return in the output file
+
+**!note:** the rust implementation is orders of magnitude faster than the python, and can generate very large output files with relative ease given large, complex data.
 
 
 # Implementations
