@@ -52,3 +52,48 @@ calculate weighted LD
     if r2 above 0.05 return else skip.
 
 
+# Implementations
+
+## Python
+
+The default implementation of the WeightedLD algorithm is written in Python, and lives in `./WeightedLD.py`. Full usage instructions can be found by running `python WeightedLD.py --help`
+
+In order to run the program, you must have a python environment where the following packages are available:
+- numpy
+- biopython
+
+## Rust
+
+A second implementation of the WeightedLD algorithm has been written in Rust, and lives in `./rust/weighted_ld`.
+This implementation should give exactly the same numeric answers as the Python implemetation, while being substantially faster.
+This is at the expense of the source code being a little harder to read and a little more verbose.
+
+To build and run the Rust implementation from source:
+1. Install a Rust toolchain. We recommend using [rustup](https://rustup.rs/), though your Linux distribution's package manager may have a sufficiently up to date version for you to install instead.
+2. `cd` into `./rust/weighted_ld`
+3. Run `cargo build --release`. Note that this step may take a few minutes the first time.
+4. Once complete, the built executable can be found at `./target/release/weighted_ld` (`./target/release/weighted_ld.exe` on Windows.
+
+Full usage instructions can be found by running the built executable with the `--help` argument.
+
+### More Rust performance
+
+There is an optional feature that can be enabled in the Rust implemetation which can *substantially* increase the calculation performance (~2-10x).
+Unfortunately it relies on some features of Rust which are currently only found in Rust's nightly toolchain.
+To build the Rust impl with this feature:
+1. Switch to the nightly toolchain by running `rustup default nightly`.
+2. Run `cargo build --release --features simd`.
+3. The built executable should the be available at the same location as before.
+
+### Even more Rust performance
+
+The above steps all end up producing a native executable that should be portable across all x86 machines running the same OS as the build machine.
+There is a way to instruct the Rust compiler to produce a binary that makes full use of the current CPU's feature set.
+Doing this often yields a fair degree of extra performance (up to ~50% in our testing) at the expense of producing a binary that is not guaranteed to run on CPUs other than the one used to build it.
+The steps for doing this are as follows:
+1. Set the environment variable `RUSTFLAGS` to `-C target-cpu=native`
+   - Eg in Bash, `export RUSTFLAGS='-C target-cpu=native'`
+   - Eg in Powershell, `$Env:RUSTFLAGS='-C target-cpu=native'`
+2. Build and run as described in one of the above sections
+
+Remember to unset this environment variable if you would like to build a portable executable again.
