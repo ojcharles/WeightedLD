@@ -24,7 +24,7 @@ At its most basic usage, only the  `--input` argument is required e.g.
 The Rust implementation lives in `./rust/weighted_ld` and requires compilation before running, see Installation below. Full usage instruction can be found by running `weighted_ld --help`
 At its most basic usage, only the `--input` and `--pair-output` arguments are required.
 
-    rust/weighted_ld/target/release/weighted_ld --file my_alignment.fasta
+    rust/weighted_ld/target/release/weighted_ld --input my_alignment.fasta
      
  **!note:** the rust implementation is orders of magnitude faster than the python, and can generate very large output files with relative ease given large, complex data.
  
