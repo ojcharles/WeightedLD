@@ -307,7 +307,7 @@ pub fn read_fasta<P: AsRef<Path>>(path: P) -> Result<MultiSequence, std::io::Err
 }
 
 /// Given a slice of all symbols in a site, should the site be considered for further computations
-pub fn is_site_of_interest(site: &[Symbol], min_acgt: usize, min_minor: f32, max_minor: f32) -> bool {
+pub fn is_site_of_interest(site: &[Symbol], min_acgt: usize, min_minor: f32) -> bool {
     let hist = SymbolHistogram::from_slice(site);
 
     let acgt_count = hist.acgt();
@@ -328,8 +328,8 @@ pub fn is_site_of_interest(site: &[Symbol], min_acgt: usize, min_minor: f32, max
         let minor_frac = min_count / (min_count + maj_count);
         // let minor_frac = (acgt_count as f32 - min_count) / acgt_count as f32;
 
-        if minor_frac < min_minor || minor_frac > max_minor {
-            // The fraction of minor symbols is either too low or too high
+        if minor_frac < min_minor {
+            // The fraction of minor symbols is too low
             false
         } else {
             true

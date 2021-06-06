@@ -18,29 +18,22 @@ use weighted_ld::*;
     about = "A tool for computing sequence weighted linkage disequilibrium"
 )]
 struct Opt {
-    #[structopt(long, help = "The source file to load")]
+    #[structopt(long, help = "The source file to load in FASTA or VCF format")]
     fasta_input: PathBuf,
 
     #[structopt(
         long,
         default_value = "0.8",
-        help = "Minimum fractions of ACTG for a site to be considered"
+        help = "Minimum fraction of A,C,G & T required for a site to be considered in LD and weighting calculations. Increase to account for poor sequence coverage"
     )]
     min_acgt: f32,
 
     #[structopt(
         long,
         default_value = "0.02",
-        help = "Minimum fraction of minor symbols for a site to be considered"
+        help = "The minimum (dominant) minor allele fraction for a site to be considered in LD calculations"
     )]
-    min_minor: f32,
-
-    #[structopt(
-        long,
-        default_value = "0.5",
-        help = "Maximum fraction of minor symbols for a site to be considered"
-    )]
-    max_minor: f32,
+    min_variability: f32,
 
     #[structopt(
         long,
@@ -99,7 +92,7 @@ fn write_pair_stats(
 
     let mut written = 0u64;
 
-    writeln!(w, "site_a\tsite_b\td\td'\tr2")?;
+    writeln!(w, "site_a\tsite_b\tD\tD'\tr2")?;
 
     for (first_idx, second_idx, ld_stat) in pairs.iter() {
         writeln!(
@@ -138,10 +131,9 @@ fn main() -> Result<(), std::io::Error> {
 
     let sw = Instant::now();
     let min_acgt = (opt.min_acgt * siteset.n_seqs() as f32).ceil() as usize;
-    let min_minor = opt.min_minor;
-    let max_minor = opt.max_minor;
+    let min_minor = opt.min_variability;
     let filtered_siteset =
-        siteset.filter_by(|s| is_site_of_interest(s, min_acgt, min_minor, max_minor));
+        siteset.filter_by(|s| is_site_of_interest(s, min_acgt, min_minor));
     info!(
         "Computed + filtered sites of interest in {:?}",
         sw.elapsed()

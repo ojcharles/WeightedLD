@@ -174,7 +174,7 @@ def ld(alignment, weights, site_map, r2_threshold=0.1):
     n_sites = alignment.shape[1]
 
     # stdout headers
-    print("posa\tposb\tD\tD'\tR2")
+    print("site_a\tsite_b\tD\tD'\tr2")
     for first_site in range(n_sites - 1):
         logging.info("    Outer loop: %s/%s", first_site, n_sites)
         for second_site in range(first_site + 1, n_sites):
@@ -386,6 +386,7 @@ def handle_vcf(filename):
 
 def main(args):
     filename = str(args.input)
+    print(args.weights_output)
 
     if filename.endswith('.vcf'):
         alignment, site_map = handle_vcf(filename)
@@ -400,7 +401,9 @@ def main(args):
     else:
         logging.info("Computing Henikoff weights for each sequence")
         weights = henikoff_weighting(alignment)
-        # todo print weights to file
+        # print Henikoff weights to table
+        if args.weights_output != None:
+            np.savetxt(args.weights_output, weights, delimiter='\t')
 
     logging.info("Computing the LD parameters")
 
@@ -412,14 +415,16 @@ if __name__ == "__main__":
     parser.add_argument("--input", type=Path,
                         help="The source file to load", required=True)
     parser.add_argument("--min-acgt", type=float, default=0.8,
-                        help="Minimum fractions of ACTG at a given site for the site to be included in calculation.\
-            increase this to remove more noise say 0.5")
+                        help="Sets a minimum fraction of A,C,G & T required for a site to be considered in LD and \
+                            weighting calculations. Increase to account for poor sequence coverage.")
     parser.add_argument("--min-variability", type=float, default=0.02,
-                        help="Minimum fraction of minor symbols for a site to be considered")
+                        help="The minimum (dominant) minor allele fraction for a site to be considered in LD calculations")
     parser.add_argument("--unweighted", action='store_true', default=False,
                         help="Use unit weights instead of Henikoff weights")
     parser.add_argument("--r2-threshold", action='store_true', default=0.1,
                         help="Minimum value of R2 for a pairwise site comparion to be included in the output")
+    parser.add_argument("--weights-output", type=Path, required=False,
+                        help="Filename to write the per-sequence weights to, in Tab Separated Value format")
 
     args = parser.parse_args()
     main(args)

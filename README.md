@@ -30,15 +30,13 @@ At its most basic usage, only the `--input` and `--pair-output` arguments are re
  
  **Common arguments:**
 
-`--min-acgt` sets a minimum fraction of A,C,G & T required for a site to be considered in LD and weighting calculations. e.g. to account for poor sequence coverage, default: 0.8  
+`--min-acgt` Sets a minimum fraction of A,C,G & T required for a site to be considered in LD and weighting calculations. Increase to account for poor sequence coverage., default: 0.8  
 
-`--min-variability` can be used to alter the number of sites for which LD is computed, this is the minimum fraction of, default: 0.02
+`--min-variability`  The minimum (dominant) minor allele fraction for a site to be considered in LD calculations, default: 0.02
 
-`--unweighted` calculates "vanilla" LD scores such as those in PLINK.
+`--unweighted` Use unit weights instead of Henikoff weights
 
  `--r2-threshold` defines a minimum squared Pearson correlation required per pairwise calculation for it to be returned in the output, default: 0.1
-
-This is at the expense of the source code being a little harder to read and a little more verbose.
 
 ## Installation
 

@@ -6,7 +6,6 @@ todo
 code/
 build/
 rust/weighted_ld/target/
-temp
 
 # dirs for paper
 paper/
