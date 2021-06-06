@@ -30,7 +30,7 @@ At its most basic usage, only the `--input` and `--pair-output` arguments are re
  
  **Common arguments:**
 
-`--min-acgt` Sets a minimum fraction of A,C,G & T required for a site to be considered in LD and weighting calculations. Increase to account for poor sequence coverage., default: 0.8  
+`--min-acgt` Sets a minimum fraction of A,C,G & T required for a site to be considered in LD and weighting calculations, increase to account for poor sequence coverage, default: 0.8  
 
 `--min-variability`  The minimum (dominant) minor allele fraction for a site to be considered in LD calculations, default: 0.02
 

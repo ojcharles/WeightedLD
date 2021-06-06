@@ -18,13 +18,13 @@ use weighted_ld::*;
     about = "A tool for computing sequence weighted linkage disequilibrium"
 )]
 struct Opt {
-    #[structopt(long, help = "The source file to load in FASTA or VCF format")]
+    #[structopt(long, help = "A multiple sequence alignment in FASTA format, or multi sample VCF")]
     fasta_input: PathBuf,
 
     #[structopt(
         long,
         default_value = "0.8",
-        help = "Minimum fraction of A,C,G & T required for a site to be considered in LD and weighting calculations. Increase to account for poor sequence coverage"
+        help = "Sets a minimum fraction of A,C,G & T required for a site to be considered in LD and weighting calculations, increase to account for poor sequence coverage,"
     )]
     min_acgt: f32,
 

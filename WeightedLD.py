@@ -413,18 +413,18 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WeightedLD computation tool")
     parser.add_argument("--input", type=Path,
-                        help="The source file to load", required=True)
+                        help="A multiple sequence alignment in FASTA format, or multi sample VCF", required=True)
     parser.add_argument("--min-acgt", type=float, default=0.8,
                         help="Sets a minimum fraction of A,C,G & T required for a site to be considered in LD and \
                             weighting calculations. Increase to account for poor sequence coverage.")
     parser.add_argument("--min-variability", type=float, default=0.02,
                         help="The minimum (dominant) minor allele fraction for a site to be considered in LD calculations")
-    parser.add_argument("--unweighted", action='store_true', default=False,
-                        help="Use unit weights instead of Henikoff weights")
     parser.add_argument("--r2-threshold", action='store_true', default=0.1,
                         help="Minimum value of R2 for a pairwise site comparion to be included in the output")
     parser.add_argument("--weights-output", type=Path, required=False,
                         help="Filename to write the per-sequence weights to, in Tab Separated Value format")
+    parser.add_argument("--unweighted", action='store_true', default=False,
+                        help="Use unit weights instead of Henikoff weights")
 
     args = parser.parse_args()
     main(args)
