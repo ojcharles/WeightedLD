@@ -24,7 +24,7 @@ At its most basic usage, only the  `--input` argument is required e.g.
 The Rust implementation lives in `./rust/weighted_ld` and requires compilation before running, see Installation below. Full usage instruction can be found by running `weighted_ld --help`
 At its most basic usage, only the `--input` and `--pair-output` arguments are required.
 
-    rust/weighted_ld/target/release/weighted_ld --input my_alignment.fasta
+    rust/weighted_ld/target/release/weighted_ld --input my_alignment.fasta --pair-output my_alignment_ld.tab
      
  **!note:** the rust implementation is orders of magnitude faster than the python, and can generate very large output files with relative ease given large, complex data.
  
@@ -36,7 +36,7 @@ At its most basic usage, only the `--input` and `--pair-output` arguments are re
 
 `--unweighted` calculates "vanilla" LD scores such as those in PLINK.
 
- `--r2-threshold` defines a minimum squared Pearson correlation required per pairwise calculation for it to be returned in the output 
+ `--r2-threshold` defines a minimum squared Pearson correlation required per pairwise calculation for it to be returned in the output, default: 0.1
 
 This is at the expense of the source code being a little harder to read and a little more verbose.
 

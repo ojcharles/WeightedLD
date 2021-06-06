@@ -1,3 +1,4 @@
+//! Joseph Roberts & Oscar Charles 2021
 use human_format::Formatter;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, info, log_enabled, Level};

@@ -1,6 +1,7 @@
-# Oscar Charles 210404
+#!/usr/bin/env python3
+# Oscar Charles & Joseph Roberts 2021
 # This code calculates sequence weights using the Henikoff formula from a multiple sequence alignment
-# usage python WeightedLD.py alignment.fasta
+# Usage: python WeightedLD.py --input alignment.fasta
 
 import logging
 import argparse
@@ -151,7 +152,7 @@ def henikoff_weighting(alignment: np.ndarray) -> np.ndarray:
     return weights / weights.max()
 
 
-def ld(alignment, weights, site_map):
+def ld(alignment, weights, site_map, r2_threshold=0.1):
     """
     Generate LD metrics; D, D', and R2
 
@@ -279,15 +280,19 @@ def ld(alignment, weights, site_map):
             # calculate R2
             R2 = D**2 / (PA * Pa * PB * Pb)
 
+            # --r2-threshold
+            if(R2 < r2_threshold):
+                continue
+
             # cat output
             print(
                 f"{site_map[first_site]}\t{site_map[second_site]}\t{round(D, 4)}\t{round(DPrime, 4)}\t{round(R2, 4)}")
 
 
 def handle_fasta(args):
-    logging.info("Reading FASTA data from %s", args.file)
+    logging.info("Reading FASTA data from %s", args.input)
     # convert fasta character alignment to integer matrix
-    alignment = read_fasta(args.file)
+    alignment = read_fasta(args.input)
     logging.info(
         "Finished reading data. Sequence count: %s, Sequence length %s", *alignment.shape)
 
@@ -380,7 +385,7 @@ def handle_vcf(filename):
 
 
 def main(args):
-    filename = str(args.file)
+    filename = str(args.input)
 
     if filename.endswith('.vcf'):
         alignment, site_map = handle_vcf(filename)
@@ -399,12 +404,12 @@ def main(args):
 
     logging.info("Computing the LD parameters")
 
-    ld(alignment, weights, site_map)
+    ld(alignment, weights, site_map, args.r2_threshold)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WeightedLD computation tool")
-    parser.add_argument("--file", type=Path,
+    parser.add_argument("--input", type=Path,
                         help="The source file to load", required=True)
     parser.add_argument("--min-acgt", type=float, default=0.8,
                         help="Minimum fractions of ACTG at a given site for the site to be included in calculation.\
@@ -413,6 +418,8 @@ if __name__ == "__main__":
                         help="Minimum fraction of minor symbols for a site to be considered")
     parser.add_argument("--unweighted", action='store_true', default=False,
                         help="Use unit weights instead of Henikoff weights")
+    parser.add_argument("--r2-threshold", action='store_true', default=0.1,
+                        help="Minimum value of R2 for a pairwise site comparion to be included in the output")
 
     args = parser.parse_args()
     main(args)

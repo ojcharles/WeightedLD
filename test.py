@@ -78,7 +78,8 @@ class TestStuff(unittest.TestCase):
         # capture stdout
         capturedOutput = io.StringIO()          # Create io object
         sys.stdout = capturedOutput             # to which we redirect stdout.
-        wld.ld(alignment, weightsHK, site_map)  # run function as normal
+        # run function as normal
+        wld.ld(alignment, weightsHK, site_map, r2_threshold=0.0)
         sys.stdout = sys.__stdout__             # Reset redirect.
         self.assertEqual(capturedOutput.getvalue()[
             22:25], "0.0")     # D
