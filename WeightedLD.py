@@ -221,29 +221,32 @@ def ld(alignment, weights, site_map, r2_threshold=0.1):
             keep = np.array([keep_first, keep_second]).all(axis=0)
             # filter again
             target_sites = target_sites[keep, :]
+            # print(target_sites)
             target_weights = target_weights[keep]
             target_sites_major = target_sites_major[keep, ]
             target_seqs = target_sites.shape[0]
-
             total_weight = target_weights.sum()
+
+            # ----- Calculate allele frequencies
             PA, PB = np.ma.masked_array(target_weights.reshape(-1, 1).repeat(
                 2, axis=1), ~target_sites_major).sum(axis=0) / total_weight
             Pa, Pb = np.ma.masked_array(target_weights.reshape(-1, 1).repeat(
                 2, axis=1), target_sites_major).sum(axis=0) / total_weight
 
-            # after removing sequences which not Maj or dMin in both sites, we may want to skip site
+            # after removing sequences which not Maj or dMin in both sites, we may want to skip site if a site is invariant
             if round(PA, 1) == 1.0:
                 continue
             if round(PB, 1) == 1.0:
                 continue
 
-            # ----- predicted allele freqs if 0 LD
+            # ----- predicted haplotype frequencies
+            # When haplotype frequencies are equal to the product of their corresponding allele frequencies, then loci are in linkage equilibrium
             PAB = PA * PB
             PAb = PA * Pb
             PaB = Pa * PB
             Pab = Pa * Pb
 
-            # ----- observed allelle frequencies
+            # ----- observed haplotype frequencies
             ld_obs = np.zeros(4)
             ld_obs[0] = target_weights[~target_sites_major[:, 0]
                                        & ~target_sites_major[:, 1]].sum()
@@ -268,15 +271,10 @@ def ld(alignment, weights, site_map, r2_threshold=0.1):
 
             # normalised D = D'
             if D < 0:
-                denominator = max([-ld_obs[0], -ld_obs[3]])
-                if denominator == 0:
-                    denominator = min([-ld_obs[0], -ld_obs[3]])
+                denominator = max([-PAb, -PaB])
             else:
-                denominator = min([ld_obs[1], ld_obs[2]])
-                if denominator == 0:
-                    denominator = max([ld_obs[1], ld_obs[2]])
+                denominator = min([PAB, Pab])
             DPrime = D / denominator
-
             # calculate R2
             R2 = D**2 / (PA * Pa * PB * Pb)
 
@@ -386,8 +384,6 @@ def handle_vcf(filename):
 
 def main(args):
     filename = str(args.input)
-    print(args.weights_output)
-
     if filename.endswith('.vcf'):
         alignment, site_map = handle_vcf(filename)
     else:
@@ -419,7 +415,7 @@ if __name__ == "__main__":
                             weighting calculations. Increase to account for poor sequence coverage.")
     parser.add_argument("--min-variability", type=float, default=0.02,
                         help="The minimum (dominant) minor allele fraction for a site to be considered in LD calculations")
-    parser.add_argument("--r2-threshold", action='store_true', default=0.1,
+    parser.add_argument("--r2-threshold", type=float, default=0.1,
                         help="Minimum value of R2 for a pairwise site comparion to be included in the output")
     parser.add_argument("--weights-output", type=Path, required=False,
                         help="Filename to write the per-sequence weights to, in Tab Separated Value format")
