@@ -95,7 +95,11 @@ fn write_pair_stats(path: &PathBuf, pairs: &PairStore<LdStats>) -> Result<(), st
         writeln!(
             w,
             "{}\t{}\t{:.3}\t{:.3}\t{:.3}",
-            first_idx, second_idx, ld_stat.d, ld_stat.d_prime, ld_stat.r2
+            first_idx + 1,
+            second_idx + 1,
+            ld_stat.d,
+            ld_stat.d_prime,
+            ld_stat.r2
         )?;
 
         written += 1;
