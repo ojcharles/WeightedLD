@@ -130,10 +130,11 @@ def henikoff_weighting(alignment: np.ndarray) -> np.ndarray:
         count_base[base, :] = (alignment == base).sum(axis=0)
 
     # For each site, the count of unique bases at that site
-    unique_base = len(np.unique(count_base[:5, :], axis=0))
-    site_contribution = np.zeros(alignment.shape)
+    unique_base = count_base[:5, :] > 0
+    unique_base = np.sum(unique_base, axis=0)
 
     # The Henikoff weighting per site, per ok base
+    site_contribution = np.zeros(alignment.shape)
     site_contribution[ok_base] = 1 / \
         (unique_base * count_base[alignment, np.arange(n_sites)])[ok_base]
 
@@ -302,13 +303,16 @@ def handle_fasta(args):
         alignment, args.min_acgt, args.min_variability)
     logging.info("Found %s sites of interest", var_sites_LD.sum())
 
+    # calculate Henikoff weights, do this each time its fast and logicflow otherwise is a bit complex
+    weights = henikoff_weighting(alignment[:, var_sites_HK])
+
     # Trim down the alignment array to only include the sites of interest
     alignment = alignment[:, var_sites_LD]
 
     # Maps site indices in the trimmed down array to site indices in the original alignment
     site_map = np.where(var_sites_LD)[0]
 
-    return alignment, site_map
+    return alignment, site_map, weights
 
 
 def handle_vcf(filename):
@@ -377,17 +381,21 @@ def handle_vcf(filename):
     # so that its the same format as an alignment - for compatability with other functions
     alignment = np.rot90(alignment)
 
+    # calculate Henikoff weights, do this each time its fast and logicflow otherwise is a bit complex
+    weights = henikoff_weighting(alignment)
+
     logging.info(
         "Finished reading data. Sequence count: %s, Sequence length %s", *alignment.shape)
-    return alignment, site_map
+    return alignment, site_map, weights
 
 
 def main(args):
     filename = str(args.input)
     if filename.endswith('.vcf'):
-        alignment, site_map = handle_vcf(filename)
+        # with a VCF all sites should have been filtered to be variant, less Henikoff information, but will have to do
+        alignment, site_map, weights = handle_vcf(filename)
     else:
-        alignment, site_map = handle_fasta(args)
+        alignment, site_map, weights = handle_fasta(args)
 
     # default behaviour is Henikoff weighting, can be disabled
     if args.unweighted:
@@ -396,7 +404,6 @@ def main(args):
         weights[weights == 0] = 1
     else:
         logging.info("Computing Henikoff weights for each sequence")
-        weights = henikoff_weighting(alignment)
         # print Henikoff weights to table
         if args.weights_output != None:
             np.savetxt(args.weights_output, weights, delimiter='\t')

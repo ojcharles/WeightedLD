@@ -18,7 +18,10 @@ use weighted_ld::*;
     about = "A tool for computing sequence weighted linkage disequilibrium"
 )]
 struct Opt {
-    #[structopt(long, help = "A multiple sequence alignment in FASTA format, or multi sample VCF")]
+    #[structopt(
+        long,
+        help = "A multiple sequence alignment in FASTA format, or multi sample VCF"
+    )]
     fasta_input: PathBuf,
 
     #[structopt(
@@ -54,10 +57,7 @@ struct Opt {
     )]
     pair_output: PathBuf,
 
-    #[structopt(
-        long,
-        help = "Use unit weights instead of Henikoff weights"
-    )]
+    #[structopt(long, help = "Use unit weights instead of Henikoff weights")]
     unweighted: bool,
 }
 
@@ -73,10 +73,7 @@ fn write_henikoff_weights(path: &PathBuf, weights: &[f32]) -> Result<(), std::io
     Ok(())
 }
 
-fn write_pair_stats(
-    path: &PathBuf,
-    pairs: &PairStore<LdStats>,
-) -> Result<(), std::io::Error> {
+fn write_pair_stats(path: &PathBuf, pairs: &PairStore<LdStats>) -> Result<(), std::io::Error> {
     let file = File::create(path)?;
     let mut w = BufWriter::new(file);
 
@@ -132,8 +129,7 @@ fn main() -> Result<(), std::io::Error> {
     let sw = Instant::now();
     let min_acgt = (opt.min_acgt * siteset.n_seqs() as f32).ceil() as usize;
     let min_minor = opt.min_variability;
-    let filtered_siteset =
-        siteset.filter_by(|s| is_site_of_interest(s, min_acgt, min_minor));
+    let filtered_siteset = siteset.filter_by(|s| is_site_of_interest(s, min_acgt, min_minor));
     info!(
         "Computed + filtered sites of interest in {:?}",
         sw.elapsed()
@@ -170,16 +166,11 @@ fn main() -> Result<(), std::io::Error> {
             None
         };
 
-        all_weighted_ld_pairs(
-            &filtered_siteset,
-            &weights,
-            opt.r2_threshold,
-            |computed| {
-                if let Some(pb) = &pb {
-                    pb.set_position(computed as u64);
-                }
-            },
-        )
+        all_weighted_ld_pairs(&filtered_siteset, &weights, opt.r2_threshold, |computed| {
+            if let Some(pb) = &pb {
+                pb.set_position(computed as u64);
+            }
+        })
     };
     let pair_calc_duration = sw.elapsed();
     info!(
@@ -188,13 +179,11 @@ fn main() -> Result<(), std::io::Error> {
     );
     info!(
         "    {} pairs computed at ~{}, {} passed threshold",
-        Formatter::new()
-            .format(total_pairs as f64),
+        Formatter::new().format(total_pairs as f64),
         Formatter::new()
             .with_units("pairs/s")
             .format(total_pairs as f64 / pair_calc_duration.as_secs_f64()),
-        Formatter::new()
-            .format(pair_store.len() as f64),
+        Formatter::new().format(pair_store.len() as f64),
     );
 
     info!("Writing output to {:?}", opt.pair_output);

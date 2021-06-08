@@ -47,14 +47,16 @@ class TestStuff(unittest.TestCase):
                                     rtol=1e-02, atol=1e-02))
 
     def test_hkw_complex(self):
-        # seq0 has a unique base at site1, so is most distinct, ensure this
+        # example taken from Stephen F. Altschul at NIH NCBI
         file = "tests/t2_henikoff_complex1.fasta"
         alignment = wld.read_fasta(file)
         var_sites_HK, var_sites_LD = wld.compute_variable_sites(
             alignment, self.min_acgt, self.min_variability)
         alignment = alignment[:, var_sites_HK]
         weightsHK = wld.henikoff_weighting(alignment)
-        self.assertEqual(weightsHK[0], 1.0)
+        self.assertTrue(np.allclose(weightsHK,
+                                    np.array([0.76923077, 0.69230769, 1.0]),
+                                    rtol=1e-02, atol=1e-02))
 
     def test_hkw_complex_indel(self):
         # checks indels are handled correctly, here last seq is most unique and contains two insertions
@@ -66,7 +68,7 @@ class TestStuff(unittest.TestCase):
         weightsHK = wld.henikoff_weighting(alignment)
         self.assertEqual(weightsHK[7], 1.0)
 
-    def test_0ld_flatw(self):
+    def test_0ld_unweighted(self):
         # flat weights, no LD, simple example
         file = "tests/t4_weights1_ld0.fasta"
         alignment = wld.read_fasta(file)
@@ -75,16 +77,17 @@ class TestStuff(unittest.TestCase):
         weightsHK = wld.henikoff_weighting(alignment[:, var_sites_HK])
         alignment = alignment[:, var_sites_LD]
         site_map = np.where(var_sites_LD)[0]
-        # capture stdout
+        # capture stdout, run ld function, split output
         capturedOutput = io.StringIO()          # Create io object
         sys.stdout = capturedOutput             # to which we redirect stdout.
-        # run function as normal
         wld.ld(alignment, weightsHK, site_map, r2_threshold=0.0)
         sys.stdout = sys.__stdout__             # Reset redirect.
-        self.assertEqual(capturedOutput.getvalue()[
-            22:25], "0.0")     # D
+        out = capturedOutput.getvalue().replace("\n", "\t").split("\t")
+        self.assertEqual(out[7], "0.0")     # D
+        self.assertEqual(out[8], "0.0")     # DPrime
+        self.assertEqual(out[9], "0.0")     # r2
 
-    def test_wld_flatw(self):
+    def test_0ld_weighted(self):
         # flat weights, no LD, simple example - but one sequence is now weighted -> not 0 LD
         file = "tests/t4_weights1_ld0.fasta"
         alignment = wld.read_fasta(file)
@@ -93,65 +96,81 @@ class TestStuff(unittest.TestCase):
         weightsHK = wld.henikoff_weighting(alignment[:, var_sites_HK])
         alignment = alignment[:, var_sites_LD]
         site_map = np.where(var_sites_LD)[0]
-        # capture stdout
+        # capture stdout, run ld function, split output
         capturedOutput = io.StringIO()          # Create io object
         sys.stdout = capturedOutput             # to which we redirect stdout.
-        wld.ld(alignment, weightsHK, site_map)  # run function as normal
+        wld.ld(alignment, weightsHK, site_map, r2_threshold=0.0)
         sys.stdout = sys.__stdout__             # Reset redirect.
-        self.assertNotEqual(capturedOutput.getvalue()[
-            22:25], "0.0")     # D
+        out = capturedOutput.getvalue().replace("\n", "\t").split("\t")
+        self.assertNotEqual(out[7], "0.0")     # D
+        self.assertNotEqual(out[8], "0.0")     # DPrime
+        self.assertNotEqual(out[9], "0.0")     # r2
 
-    def test_ld_flatw(self):
+    def test_ld_unweighted(self):
         # flat weights, total LD, simple example
         file = "tests/t5_weights1_ld0.25.fasta"
         alignment = wld.read_fasta(file)
         var_sites_HK, var_sites_LD = wld.compute_variable_sites(
             alignment, self.min_acgt, self.min_variability)
-        weightsHK = wld.henikoff_weighting(alignment[:, var_sites_HK])
+        weightsHK = wld.henikoff_weighting(
+            alignment[:, var_sites_HK])  # all equal 1
         alignment = alignment[:, var_sites_LD]
         site_map = np.where(var_sites_LD)[0]
+        # capture stdout, run ld function, split output
         capturedOutput = io.StringIO()          # Create io object
         sys.stdout = capturedOutput             # to which we redirect stdout.
-        wld.ld(alignment, weightsHK, site_map)  # run function as normal
+        wld.ld(alignment, weightsHK, site_map, r2_threshold=0.0)
         sys.stdout = sys.__stdout__             # Reset redirect.
+        out = capturedOutput.getvalue().replace("\n", "\t").split("\t")
+        self.assertEqual(out[7], "-0.25")     # D
+        self.assertEqual(out[8], "1.0")     # DPrime
+        self.assertEqual(out[9], "1.0")     # r2
 
-        self.assertEqual(capturedOutput.getvalue()[22:27], "-0.25")     # D
-        self.assertEqual(capturedOutput.getvalue()[32:33], "1")         # r2
-
-
-""" to write
-    def test_ld_weights_complex(self):
-        # flat weights, total LD, simple example
-        min_acgt = 0.8
-        min_variability = 0.02
-        file = "tests/t3_henikoff_complex2.fasta"
+    def test_ld_khan_example(self):
+        # tests the unweighted LD statistics are correct by a correct worked example
+        # https://pbgworks.org/sites/pbgworks.org/files/measuresoflinkagedisequilibrium-111119214123-phpapp01_0.pdf
+        file = "tests/t8_ldstats.fasta"
         alignment = wld.read_fasta(file)
         var_sites_HK, var_sites_LD = wld.compute_variable_sites(
-            alignment, min_acgt, min_variability)
-        weightsHK = wld.henikoff_weighting(alignment[:, var_sites_HK])
+            alignment, self.min_acgt, self.min_variability)
+        weightsHK = np.ones(2000)  # enforce unit weights
         alignment = alignment[:, var_sites_LD]
         site_map = np.where(var_sites_LD)[0]
-
-        # capture stdout
+        # capture stdout, run ld function, split output
         capturedOutput = io.StringIO()          # Create io object
         sys.stdout = capturedOutput             # to which we redirect stdout.
-        wld.ld(alignment, weightsHK, site_map)  # run function as normal
+        wld.ld(alignment, weightsHK, site_map, r2_threshold=0.0)
         sys.stdout = sys.__stdout__             # Reset redirect.
+        out = capturedOutput.getvalue().replace("\n", "\t").split("\t")
+        self.assertEqual(out[7], "0.0699")     # D
+        self.assertEqual(out[8], "0.4961")     # DPrime
+        self.assertEqual(out[9], "0.0924")     # r2
 
-        # handle character output to something structured
-        outTable = re.split(r'\n+', capturedOutput.getvalue())
-        outTable = [x.split("\t") for x in outTable]
-        t = [el[4] for el in outTable[1:7]]
-        t = np.array(t, dtype=float)
-#        self.assertTrue(np.allclose(np.array(t),
-#                                    np.array(
-#                                        ['0.0915', '0.0824', '0.0824', '0.1586', '0.1586', '1.0'], dtype=float)
-#                                    ))
-"""
+    def test_ld_khan_example(self):
+        # A example where we calculated LD with weighting by hand according to our method
+        # We used PLINK to check the evenly weighted calculations, then altered the weights
+        file = "tests/t9_hand_written.fasta"
+        alignment = wld.read_fasta(file)
+        var_sites_HK, var_sites_LD = wld.compute_variable_sites(
+            alignment, self.min_acgt, 0.001)
+        weightsHK = wld.henikoff_weighting(
+            alignment[:, var_sites_HK])  # all equal 1
+        alignment = alignment[:, var_sites_LD]
+        site_map = np.where(var_sites_LD)[0]
+        # capture stdout, run ld function, split output
+        capturedOutput = io.StringIO()          # Create io object
+        sys.stdout = capturedOutput             # to which we redirect stdout.
+        wld.ld(alignment, weightsHK, site_map, r2_threshold=0.0)
+        sys.stdout = sys.__stdout__             # Reset redirect.
+        out = capturedOutput.getvalue().replace("\n", "\t").split("\t")
+        self.assertEqual(out[7], "-0.0399")     # D
+        self.assertEqual(out[8], "0.1608")     # DPrime
+        self.assertEqual(out[9], "0.0259")     # r2
 
 
 def test_vcf(self):
     # this code tests the whole pipeline with a vcf file, as in the 1000 genomes vcf v4.2
+    # this needs improving
     filename = "tests/t7_1000genome.vcf"
     alignment, site_map = wld.handle_vcf(filename)
     weights = wld.henikoff_weighting(alignment)

@@ -14,7 +14,7 @@ use ndarray::prelude::*;
 use num_derive::FromPrimitive;
 use rayon::prelude::*;
 
-#[cfg(feature="simd")]
+#[cfg(feature = "simd")]
 use packed_simd::{f32x8, u8x8};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, FromPrimitive)]
@@ -63,10 +63,10 @@ impl From<char> for Symbol {
     }
 }
 
-#[cfg(feature="simd")]
+#[cfg(feature = "simd")]
 unsafe impl bytemuck::Zeroable for Symbol {}
 
-#[cfg(feature="simd")]
+#[cfg(feature = "simd")]
 unsafe impl bytemuck::Pod for Symbol {}
 
 #[derive(Clone, Debug)]
@@ -90,9 +90,7 @@ impl IndexMut<Symbol> for SymbolHistogram {
 
 impl SymbolHistogram {
     fn zero() -> Self {
-        Self {
-            data: [0; 6],
-        }
+        Self { data: [0; 6] }
     }
 
     pub fn from_slice(symbols: &[Symbol]) -> Self {
@@ -112,15 +110,15 @@ impl SymbolHistogram {
         use Symbol::*;
         self[A] + self[C] + self[G] + self[T] + self[Missing]
     }
-    
+
     fn distinct_known_count(&self) -> usize {
         use Symbol::*;
 
-        (if self[A] > 0 { 1usize } else { 0 }) +
-        if self[C] > 0 { 1 } else { 0 } +
-        if self[G] > 0 { 1 } else { 0 } +
-        if self[T] > 0 { 1 } else { 0 } +
-        if self[Missing] > 0 { 1 } else { 0 }
+        (if self[A] > 0 { 1usize } else { 0 })
+            + if self[C] > 0 { 1 } else { 0 }
+            + if self[G] > 0 { 1 } else { 0 }
+            + if self[T] > 0 { 1 } else { 0 }
+            + if self[Missing] > 0 { 1 } else { 0 }
     }
 
     fn major_minor_symbols(&self) -> (Option<Symbol>, Option<Symbol>) {
@@ -209,12 +207,7 @@ impl SiteSet {
     pub fn from_strs(raw: &[&str]) -> Self {
         let sequences = raw
             .iter()
-            .map(|seq_str| {
-                seq_str
-                    .chars()
-                    .map(Symbol::from)
-                    .collect::<Vec<_>>()
-            })
+            .map(|seq_str| seq_str.chars().map(Symbol::from).collect::<Vec<_>>())
             .map(|symbols| Sequence {
                 name: None,
                 symbols,
@@ -406,14 +399,14 @@ pub fn single_weighted_ld_pair(
         (Some(maj), Some(min)) => (maj, min),
         _ => return None,
     };
-    
-    #[cfg(feature="simd")]
+
+    #[cfg(feature = "simd")]
     let simd_end = (a.len() / 8) * 8;
 
-    #[cfg(not(feature="simd"))]
+    #[cfg(not(feature = "simd"))]
     let simd_end = 0;
 
-    #[cfg(feature="simd")]
+    #[cfg(feature = "simd")]
     let (mut total_weight, mut PA, mut PB, mut ld_obs) = {
         let mut total_weight = f32x8::splat(0.0);
         let mut PA = f32x8::splat(0.0);
@@ -452,11 +445,8 @@ pub fn single_weighted_ld_pair(
         )
     };
 
-    #[cfg(not(feature="simd"))]
-    let (mut total_weight, mut PA, mut PB, mut ld_obs) = (
-        0.0, 0.0, 0.0, [0.0, 0.0, 0.0, 0.0]
-    );
-
+    #[cfg(not(feature = "simd"))]
+    let (mut total_weight, mut PA, mut PB, mut ld_obs) = (0.0, 0.0, 0.0, [0.0, 0.0, 0.0, 0.0]);
 
     for seq in simd_end..a.len() {
         if !(a[seq] == a_maj_sym || a[seq] == a_min_sym) {
@@ -485,33 +475,34 @@ pub fn single_weighted_ld_pair(
     ld_obs[1] = PB - ld_obs[3];
     ld_obs[0] = Pa - ld_obs[1];
 
+    // allele frequencies
     PA /= total_weight;
     PB /= total_weight;
     Pa /= total_weight;
     Pb /= total_weight;
+
+    // observed haplotype frequencies
     ld_obs[0] /= total_weight;
     ld_obs[1] /= total_weight;
     ld_obs[2] /= total_weight;
     ld_obs[3] /= total_weight;
 
+    // Expected haplotype frequencies
+    // When haplotype frequencies are equal to the product of their corresponding allele frequencies, then loci are in linkage equilibrium
     let PAB = PA * PB;
     let PAb = PA * Pb;
     let PaB = Pa * PB;
     let Pab = Pa * Pb;
 
+    // ----- Calculate the Linkage Disequilibrium statistics
+    // strictly speaking, we shouldn't need all 4 observations, but it doesn't hurt.
     let d = ((PAB - ld_obs[3]) + (Pab - ld_obs[0]) + (ld_obs[2] - PAb) + (ld_obs[1] - PaB)) / 4f32;
 
-    let mut denominator: f32;
+    let denominator: f32;
     if d < 0f32 {
-        denominator = (-ld_obs[0]).max(-ld_obs[3]);
-        if denominator == 0f32 {
-            denominator = (-ld_obs[0]).min(-ld_obs[3]);
-        }
+        denominator = -PAb.min(PaB);
     } else {
-        denominator = (ld_obs[1]).min(ld_obs[2]);
-        if denominator == 0f32 {
-            denominator = (ld_obs[1]).max(ld_obs[2]);
-        }
+        denominator = PAB.min(Pab);
     }
     let d_prime = d / denominator;
 
@@ -585,7 +576,7 @@ pub fn all_weighted_ld_pairs(
 
     let computed_pair_count = AtomicUsize::new(0);
     let progress_report = Mutex::new(progress_report);
-    
+
     // Consider the complete pair set as an upper triangular matrix of size (n_sites, n_site),
     // where the column index is the index of the first pair, and the row index is the index of the
     // second pair.
@@ -595,7 +586,7 @@ pub fn all_weighted_ld_pairs(
     // where each task computes a single element. Splitting the work in this manner would be
     // tremendously inneficient however - for most real alignments this would mean a vast number of
     // very quick tasks, so the task scheduling overhead would dominate.
-    // 
+    //
     // A better method would be to split the set of elements to compute into chunks, and let each
     // task consist of computing all of a single chunk.
     //
@@ -613,12 +604,15 @@ pub fn all_weighted_ld_pairs(
     // The side length of the square chunks
     // TODO: pick this value dynamically based on {n_seqs, cpu cache size}
     let chunk_size = 256;
-    
+
     // The number of chunks along a single edge of the matrix
     let n = site_set.n_sites() / chunk_size;
-    let n = if (site_set.n_sites() % chunk_size) > 0 { n + 1 } else { n };
+    let n = if (site_set.n_sites() % chunk_size) > 0 {
+        n + 1
+    } else {
+        n
+    };
 
-    
     // Given a linear chunk index, return the 2d chunk coordinates
     fn triu_index(n: usize, i: usize) -> (usize, usize) {
         // The "triangular root" of i
@@ -627,10 +621,10 @@ pub fn all_weighted_ld_pairs(
 
         let row = n - root_floor - 1;
         let col = row + i - (root_floor * (root_floor + 1) / 2);
-        
+
         (row, col)
     }
-    
+
     let chunk_count = n * (n + 1) / 2;
     let data_chunks = (0..chunk_count)
         .into_par_iter()
@@ -640,7 +634,7 @@ pub fn all_weighted_ld_pairs(
             let a_end = std::cmp::min(a_start + chunk_size, site_set.n_sites());
             let b_start = chunk_b * chunk_size;
             let b_end = std::cmp::min(b_start + chunk_size, site_set.n_sites());
-            
+
             let mut results_chunk = Vec::with_capacity(chunk_size * chunk_size);
             let mut computed = 0;
 
@@ -667,11 +661,12 @@ pub fn all_weighted_ld_pairs(
                     }
                 }
             }
-            let total_computed = computed_pair_count
-                .fetch_add(computed, Ordering::Relaxed);
+            let total_computed = computed_pair_count.fetch_add(computed, Ordering::Relaxed);
             (progress_report
                 .lock()
-                .expect("Failed to get lock on progress indicator callback"))(total_computed);
+                .expect("Failed to get lock on progress indicator callback"))(
+                total_computed
+            );
 
             results_chunk
         })
@@ -738,7 +733,11 @@ mod tests {
     fn test_henikoff_weights_2() {
         // as in S.F. Altschul NIH
         let siteset = SiteSet::from_strs(&["GCGTTAGC", "GAGTTGGA", "CGGACTAA"]);
-        assert_abs_diff_eq!(henikoff_weights(&siteset)[..], [0.769, 0.692, 1.0], epsilon = 0.001); // todo ever so slightly off could be float point error
+        assert_abs_diff_eq!(
+            henikoff_weights(&siteset)[..],
+            [0.769, 0.692, 1.0],
+            epsilon = 0.001
+        ); // todo ever so slightly off could be float point error
     }
 
     #[test]
@@ -746,15 +745,19 @@ mod tests {
         // ensure that indels are treated equally - seq 2 is most unique
         // 0.9166 , 1.25, 0.9166, 0.9166 -> 0.7333, 1, 0.7333, 0.7333
         let siteset = SiteSet::from_strs(&["AAGA", "AA-A", "GGGG", "GGGG"]);
-        assert_abs_diff_eq!(henikoff_weights(&siteset)[..], [0.733, 1.0, 0.733, 0.733], epsilon = 0.001); // todo handle assert nearly equal
+        assert_abs_diff_eq!(
+            henikoff_weights(&siteset)[..],
+            [0.733, 1.0, 0.733, 0.733],
+            epsilon = 0.001
+        ); // todo handle assert nearly equal
     }
 
     #[test]
     fn test_ld_pair_unweighted_ld0() {
         use Symbol::*;
-        let a = [A, A, A, A, T, T, T, T ];
-        let b = [T, T, A, A, A, A, T, T ];
-        let weights = [1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0];
+        let a = [A, A, A, A, T, T, T, T];
+        let b = [T, T, A, A, A, A, T, T];
+        let weights = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
 
         let a_hist = SymbolHistogram::from_slice(&a);
         let b_hist = SymbolHistogram::from_slice(&b);
@@ -769,34 +772,38 @@ mod tests {
     #[test]
     fn test_ld_pair_unweighted_ld1() {
         use Symbol::*;
-        let a = [A, A, A, A, T, T, T, T ];
-        let b = [T, T, T, T, A, A, A, A ];
-        let weights = [1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0];
+        let a = [A, A, A, A, T, T, T, T];
+        let b = [T, T, T, T, A, A, A, A];
+        let weights = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
 
         let a_hist = SymbolHistogram::from_slice(&a);
         let b_hist = SymbolHistogram::from_slice(&b);
         let ld_stats = single_weighted_ld_pair(&a, &a_hist, &b, &b_hist, &weights)
             .expect("Expected test case to have LD statistics available");
-        println!("{}",&ld_stats.d);
+        println!("{}", &ld_stats.d);
+        println!("{}", &ld_stats.d_prime);
         assert_abs_diff_eq!(ld_stats.d, 0.25, epsilon = 1e-5);
-        assert_abs_diff_eq!(ld_stats.d_prime, 0.5, epsilon = 1e-5);
+        assert_abs_diff_eq!(ld_stats.d_prime, 1.0, epsilon = 1e-5);
         assert_abs_diff_eq!(ld_stats.r2, 1.0, epsilon = 1e-5);
     }
 
     #[test]
-    fn test_single_weighted_ld_pair() { //todo paper and pen this example as a sanity check
+    fn test_ld_pair_weighted() {
+        // we pen and papered this calculation, the unweighted results were equal to PLINK.
+        // we then alteres the weight of each sequence as in our paper
         use Symbol::*;
-        let a = [A, A, A, A, C, A, C];
-        let b = [A, A, A, G, T, A, A];
-        let weights = [1.0, 1.0, 0.4, 0.2, 0.5, 0.8, 0.2];
+        let a = [A, T, A, T, A];
+        let b = [A, T, T, A, A];
+        let siteset = SiteSet::from_strs(&["AA", "TT", "TA", "AT", "AA"]);
+        let weights = &henikoff_weights(&siteset)[..];
 
         let a_hist = SymbolHistogram::from_slice(&a);
         let b_hist = SymbolHistogram::from_slice(&b);
         let ld_stats = single_weighted_ld_pair(&a, &a_hist, &b, &b_hist, &weights)
             .expect("Expected test case to have LD statistics available");
 
-        assert_abs_diff_eq!(ld_stats.d, 0.00308, epsilon = 1e-5);
-        assert_abs_diff_eq!(ld_stats.d_prime, 0.05555, epsilon = 1e-5);
-        assert_abs_diff_eq!(ld_stats.r2, 0.00346, epsilon = 1e-5);
+        assert_abs_diff_eq!(ld_stats.d, -0.03993, epsilon = 1e-5);
+        assert_abs_diff_eq!(ld_stats.d_prime, 0.160835, epsilon = 1e-5);
+        assert_abs_diff_eq!(ld_stats.r2, 0.025868, epsilon = 1e-5);
     }
 }
