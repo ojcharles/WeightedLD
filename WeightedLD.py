@@ -1,6 +1,7 @@
-# Oscar Charles 210404
+#!/usr/bin/env python3
+# Oscar Charles & Joseph Roberts 2021
 # This code calculates sequence weights using the Henikoff formula from a multiple sequence alignment
-# usage python WeightedLD.py alignment.fasta
+# Usage: python WeightedLD.py --input alignment.fasta
 
 import logging
 import argparse
@@ -129,10 +130,11 @@ def henikoff_weighting(alignment: np.ndarray) -> np.ndarray:
         count_base[base, :] = (alignment == base).sum(axis=0)
 
     # For each site, the count of unique bases at that site
-    unique_base = len(np.unique(count_base[:5, :], axis=0))
-    site_contribution = np.zeros(alignment.shape)
+    unique_base = count_base[:5, :] > 0
+    unique_base = np.sum(unique_base, axis=0)
 
     # The Henikoff weighting per site, per ok base
+    site_contribution = np.zeros(alignment.shape)
     site_contribution[ok_base] = 1 / \
         (unique_base * count_base[alignment, np.arange(n_sites)])[ok_base]
 
@@ -151,7 +153,7 @@ def henikoff_weighting(alignment: np.ndarray) -> np.ndarray:
     return weights / weights.max()
 
 
-def ld(alignment, weights, site_map):
+def ld(alignment, weights, site_map, r2_threshold=0.1):
     """
     Generate LD metrics; D, D', and R2
 
@@ -173,7 +175,7 @@ def ld(alignment, weights, site_map):
     n_sites = alignment.shape[1]
 
     # stdout headers
-    print("posa\tposb\tD\tD'\tR2")
+    print("site_a\tsite_b\tD\tD'\tr2")
     for first_site in range(n_sites - 1):
         logging.info("    Outer loop: %s/%s", first_site, n_sites)
         for second_site in range(first_site + 1, n_sites):
@@ -220,29 +222,32 @@ def ld(alignment, weights, site_map):
             keep = np.array([keep_first, keep_second]).all(axis=0)
             # filter again
             target_sites = target_sites[keep, :]
+            # print(target_sites)
             target_weights = target_weights[keep]
             target_sites_major = target_sites_major[keep, ]
             target_seqs = target_sites.shape[0]
-
             total_weight = target_weights.sum()
+
+            # ----- Calculate allele frequencies
             PA, PB = np.ma.masked_array(target_weights.reshape(-1, 1).repeat(
                 2, axis=1), ~target_sites_major).sum(axis=0) / total_weight
             Pa, Pb = np.ma.masked_array(target_weights.reshape(-1, 1).repeat(
                 2, axis=1), target_sites_major).sum(axis=0) / total_weight
 
-            # after removing sequences which not Maj or dMin in both sites, we may want to skip site
+            # after removing sequences which not Maj or dMin in both sites, we may want to skip site if a site is invariant
             if round(PA, 1) == 1.0:
                 continue
             if round(PB, 1) == 1.0:
                 continue
 
-            # ----- predicted allele freqs if 0 LD
+            # ----- predicted haplotype frequencies
+            # When haplotype frequencies are equal to the product of their corresponding allele frequencies, then loci are in linkage equilibrium
             PAB = PA * PB
             PAb = PA * Pb
             PaB = Pa * PB
             Pab = Pa * Pb
 
-            # ----- observed allelle frequencies
+            # ----- observed haplotype frequencies
             ld_obs = np.zeros(4)
             ld_obs[0] = target_weights[~target_sites_major[:, 0]
                                        & ~target_sites_major[:, 1]].sum()
@@ -267,17 +272,16 @@ def ld(alignment, weights, site_map):
 
             # normalised D = D'
             if D < 0:
-                denominator = max([-ld_obs[0], -ld_obs[3]])
-                if denominator == 0:
-                    denominator = min([-ld_obs[0], -ld_obs[3]])
+                denominator = max([-PAb, -PaB])
             else:
-                denominator = min([ld_obs[1], ld_obs[2]])
-                if denominator == 0:
-                    denominator = max([ld_obs[1], ld_obs[2]])
+                denominator = min([PAB, Pab])
             DPrime = D / denominator
-
             # calculate R2
             R2 = D**2 / (PA * Pa * PB * Pb)
+
+            # --r2-threshold
+            if(R2 < r2_threshold):
+                continue
 
             # cat output
             print(
@@ -285,9 +289,9 @@ def ld(alignment, weights, site_map):
 
 
 def handle_fasta(args):
-    logging.info("Reading FASTA data from %s", args.file)
+    logging.info("Reading FASTA data from %s", args.input)
     # convert fasta character alignment to integer matrix
-    alignment = read_fasta(args.file)
+    alignment = read_fasta(args.input)
     logging.info(
         "Finished reading data. Sequence count: %s, Sequence length %s", *alignment.shape)
 
@@ -299,13 +303,16 @@ def handle_fasta(args):
         alignment, args.min_acgt, args.min_variability)
     logging.info("Found %s sites of interest", var_sites_LD.sum())
 
+    # calculate Henikoff weights, do this each time its fast and logicflow otherwise is a bit complex
+    weights = henikoff_weighting(alignment[:, var_sites_HK])
+
     # Trim down the alignment array to only include the sites of interest
     alignment = alignment[:, var_sites_LD]
 
     # Maps site indices in the trimmed down array to site indices in the original alignment
     site_map = np.where(var_sites_LD)[0]
 
-    return alignment, site_map
+    return alignment, site_map, weights
 
 
 def handle_vcf(filename):
@@ -374,18 +381,21 @@ def handle_vcf(filename):
     # so that its the same format as an alignment - for compatability with other functions
     alignment = np.rot90(alignment)
 
+    # calculate Henikoff weights, do this each time its fast and logicflow otherwise is a bit complex
+    weights = henikoff_weighting(alignment)
+
     logging.info(
         "Finished reading data. Sequence count: %s, Sequence length %s", *alignment.shape)
-    return alignment, site_map
+    return alignment, site_map, weights
 
 
 def main(args):
-    filename = str(args.file)
-
+    filename = str(args.input)
     if filename.endswith('.vcf'):
-        alignment, site_map = handle_vcf(filename)
+        # with a VCF all sites should have been filtered to be variant, less Henikoff information, but will have to do
+        alignment, site_map, weights = handle_vcf(filename)
     else:
-        alignment, site_map = handle_fasta(args)
+        alignment, site_map, weights = handle_fasta(args)
 
     # default behaviour is Henikoff weighting, can be disabled
     if args.unweighted:
@@ -394,23 +404,28 @@ def main(args):
         weights[weights == 0] = 1
     else:
         logging.info("Computing Henikoff weights for each sequence")
-        weights = henikoff_weighting(alignment)
-        # todo print weights to file
+        # print Henikoff weights to table
+        if args.weights_output != None:
+            np.savetxt(args.weights_output, weights, delimiter='\t')
 
     logging.info("Computing the LD parameters")
 
-    ld(alignment, weights, site_map)
+    ld(alignment, weights, site_map, args.r2_threshold)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WeightedLD computation tool")
-    parser.add_argument("--file", type=Path,
-                        help="The source file to load", required=True)
+    parser.add_argument("--input", type=Path,
+                        help="A multiple sequence alignment in FASTA format, or multi sample VCF", required=True)
     parser.add_argument("--min-acgt", type=float, default=0.8,
-                        help="Minimum fractions of ACTG at a given site for the site to be included in calculation.\
-            increase this to remove more noise say 0.5")
+                        help="Sets a minimum fraction of A,C,G & T required for a site to be considered in LD and \
+                            weighting calculations. Increase to account for poor sequence coverage.")
     parser.add_argument("--min-variability", type=float, default=0.02,
-                        help="Minimum fraction of minor symbols for a site to be considered")
+                        help="The minimum (dominant) minor allele fraction for a site to be considered in LD calculations")
+    parser.add_argument("--r2-threshold", type=float, default=0.1,
+                        help="Minimum value of R2 for a pairwise site comparion to be included in the output")
+    parser.add_argument("--weights-output", type=Path, required=False,
+                        help="Filename to write the per-sequence weights to, in Tab Separated Value format")
     parser.add_argument("--unweighted", action='store_true', default=False,
                         help="Use unit weights instead of Henikoff weights")
 

@@ -1,77 +1,72 @@
-requirements
+
+# WeightedLD
+The application of sequencing weighting to calculations of pairwise Linkage Disequilibrium (LD).
+
+Given a Multiple Sequence Alignment (MSA) or Variant Call File (VCF) the program will calculate per sequence its weight using the Henikoff* methodology, which is then employed in calculating the observed and expected allele frequencies , rather than treating each sequence evenly, to produce LD metrics D, D' & r2. This can be important to account for sampling bias, population structures. We demonstrate in a preprint* that this reduces the effect of uneven sampling, as underrepresented groups of sequences will each contribute more individually than redundant,
+similar sequences.
+
+-- Charles, O et al. WeightedLD: The Application of Sequence Weights to Linkage Disequilibrium. BioRxiv (2021)
+-- Henikoff, S. & Henikoff, J. G. Position-based sequence weights. _Journal of Molecular Biology_  **243**, 574–578 (1994).
+
+## Usage
+We provide two implementations of WeightedLD, one in Python and another in Rust.
+Both should give exactly the same numeric answers, the Rust program however is orders of magnitude faster and will be required for analyses with greater than circa 1000 variable sites.
+
+**Python**
+
+The Python implementation lives in `./WeightedLD.py`. Full usage instructions can be found by running `python WeightedLD.py --help`
+At its most basic usage, only the  `--input` argument is required e.g.
+
+    python WeightedLD.py --input my_alignment.fasta 
+   
+**Rust**
+
+The Rust implementation lives in `./rust/weighted_ld` and requires compilation before running, see Installation below. Full usage instruction can be found by running `weighted_ld --help`
+At its most basic usage, only the `--input` and `--pair-output` arguments are required.
+
+    rust/weighted_ld/target/release/weighted_ld --input my_alignment.fasta --pair-output my_alignment_ld.tab
+     
+ **!note:** the rust implementation is orders of magnitude faster than the python, and can generate very large output files with relative ease given large, complex data.
+ 
+ **Common arguments:**
+
+`--min-acgt` Sets a minimum fraction of A,C,G & T required for a site to be considered in LD and weighting calculations, increase to account for poor sequence coverage, default: 0.8  
+
+`--min-variability`  The minimum (dominant) minor allele fraction for a site to be considered in LD calculations, default: 0.02
+
+`--unweighted` Use unit weights instead of Henikoff weights
+
+ `--r2-threshold` defines a minimum squared Pearson correlation required per pairwise calculation for it to be returned in the output, default: 0.1
+
+## Installation
+
+Get the WeightedLD source code:
+> wget https://github.com/ojcharles/WeightedLD/archive/refs/heads/main.zip
+> unzip main.zip
+> cd WeightedLD-main
 
 
+### Python
 
-1 - read alignment
-    type fasta [*.fasta, *.fa]
-
-
-2 - convert alignment to integer matrix
-    "A","C","T","G","-","OTHER"
-     0   1   2   3   4     5
-
-
-identify variable sites for henikoff
-    okbase = count those with [0,1,2,3] 
-        we want to compute "-" in henikoff, but ignore sites with too many "-", or ambiguous bases, they may infer poor sequencing
-    sufficient_data =   frac_okbase > input.min_acgt_fraction  //i.e. sum(0-3) / nSeq = 0.9 and  0.9 > 0.8 so TRUE
-    has_variation   =   has any level of variation for [0,1,2,3,4] i.e. 99 A and 1 -
-    no cap on max variability
-    return boolean of sites which have: sufficient_data & has_variation i.e. T,F,T,T,T,F,T
-
-
-identify variable sites for LD  //as in henikoff, and in addition:
-    // as alignments can have three+ almost equal bases at a position
-    identify major_base at site
-    identify most dominant minor base. i.e. [AAACCT] Major -> A, domMinor -> C
-    minor_fraction = dominant_minor_count / (dominant_minor_count + major_count)
-        // This should be fine, as ignoring second anf third most important base just increases minor_fraction
-    has_min_variability minor_fraction >= min_variability
-    return boolean of sites: sufficient_data & has_variation * has_min_variability i.e. F,F,T,T,T,F,T
-    // no need for major frac check now, as we will exclude in LD. ie limit to only two types of base and throw out everyhing thats not Maj or majMin
-
-
-Calculate Henikoff sequence weights
-    input is the matrix alignment including 4 and 5's.
-    calculate the score per sequence treating 0,1,2,3,4 as unique ok values
-    keep track of mean score per site
-    sequences at a site wih 5 are given the mean value for that site
-    each sequence accumulates a total weight, sum of weights across all sites
-    final step is normalising, such that the most unique sequence has weight of 1
-
-
-calculate weighted LD
-    by sequence number, not weight contribution
-        Identify Major base //should be limited to 0-3, only in an extreme case of 5 equal bases with  ambigious only in acgt will this error
-        Identify dominant Minor base 0-4
-    Identify ambigous bases
-    remove sequences from calculation that are ambiguous, or (not in Major & dominant Minor).  union of pairwise sites
-    calculate predicted PA, Pa, QB, Qb from real allele fractions
-    sum up observed AB, Ab, aB, ab
-    calculate D, D' and R2 per site.
-    if r2 above 0.05 return else skip.
-
-
-# Implementations
-
-## Python
-
-The default implementation of the WeightedLD algorithm is written in Python, and lives in `./WeightedLD.py`. Full usage instructions can be found by running `python WeightedLD.py --help`
 
 In order to run the program, you must have a python environment where the following packages are available:
 - numpy
 - biopython
 
-## Rust
+A simple conda environment is provided which allows users to run the program with tested dependencies.
 
-A second implementation of the WeightedLD algorithm has been written in Rust, and lives in `./rust/weighted_ld`.
-This implementation should give exactly the same numeric answers as the Python implemetation, while being substantially faster.
-This is at the expense of the source code being a little harder to read and a little more verbose.
+> conda env create -f WeightedLD_conda.yml
+
+### Rust
 
 To build and run the Rust implementation from source:
+
 1. Install a Rust toolchain. We recommend using [rustup](https://rustup.rs/), though your Linux distribution's package manager may have a sufficiently up to date version for you to install instead.
-2. `cd` into `./rust/weighted_ld`
+
+2.  `cd` into `./rust/weighted_ld`
+
 3. Run `cargo build --release`. Note that this step may take a few minutes the first time.
+
 4. Once complete, the built executable can be found at `./target/release/weighted_ld` (`./target/release/weighted_ld.exe` on Windows.
 
 Full usage instructions can be found by running the built executable with the `--help` argument.
@@ -79,21 +74,40 @@ Full usage instructions can be found by running the built executable with the `-
 ### More Rust performance
 
 There is an optional feature that can be enabled in the Rust implemetation which can *substantially* increase the calculation performance (~2-10x).
+
 Unfortunately it relies on some features of Rust which are currently only found in Rust's nightly toolchain.
+
 To build the Rust impl with this feature:
+
 1. Switch to the nightly toolchain by running `rustup default nightly`.
+
 2. Run `cargo build --release --features simd`.
+
 3. The built executable should the be available at the same location as before.
 
 ### Even more Rust performance
 
 The above steps all end up producing a native executable that should be portable across all x86 machines running the same OS as the build machine.
+
 There is a way to instruct the Rust compiler to produce a binary that makes full use of the current CPU's feature set.
+
 Doing this often yields a fair degree of extra performance (up to ~50% in our testing) at the expense of producing a binary that is not guaranteed to run on CPUs other than the one used to build it.
+
 The steps for doing this are as follows:
+
 1. Set the environment variable `RUSTFLAGS` to `-C target-cpu=native`
-   - Eg in Bash, `export RUSTFLAGS='-C target-cpu=native'`
-   - Eg in Powershell, `$Env:RUSTFLAGS='-C target-cpu=native'`
+
+- Eg in Bash, `export RUSTFLAGS='-C target-cpu=native'`
+
+- Eg in Powershell, `$Env:RUSTFLAGS='-C target-cpu=native'`
+
 2. Build and run as described in one of the above sections
 
 Remember to unset this environment variable if you would like to build a portable executable again.
+
+## Getting help
+
+If you encounter a clear bug, please file an issue with a minimal
+reproducible example on the GitHub Issues page. For questions and other
+discussions feel free to contact. [Oscar Charles -
+maintainer](mailto:oscar.charles.18@ucl.ac.uk)
