@@ -22,7 +22,7 @@ struct Opt {
         long,
         help = "A multiple sequence alignment in FASTA format, or multi sample VCF"
     )]
-    fasta_input: PathBuf,
+    input: PathBuf,
 
     #[structopt(
         long,
@@ -117,7 +117,7 @@ fn main() -> Result<(), std::io::Error> {
     debug!("{:?}", opt);
 
     let sw = Instant::now();
-    let multiseq = read_fasta(opt.fasta_input)?;
+    let multiseq = read_fasta(opt.input)?;
     let siteset = SiteSet::from_multiseq(&multiseq);
     info!("Loaded fasta file in {:?}", sw.elapsed());
     info!(
